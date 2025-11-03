@@ -34,4 +34,3 @@ def tprint(*args, **kwargs):
 
 # 기존 print를 tprint로 교체하고 싶다면 주석 해제
 # print = tprint
-
