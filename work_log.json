@@ -1,0 +1,188 @@
+[
+  {
+    "date": "2025-09-25",
+    "category": "기타 장비 점검",
+    "status": "진행중",
+    "start_datetime": "2025-09-25 09:00",
+    "end_datetime": "2025-10-14 17:00",
+    "start_time": "09:00",
+    "end_time": "17:00",
+    "content": "LEUS 해체 작업 진행함.",
+    "timestamp": "2025-09-26 15:15:14",
+    "modified": "2025-09-29 14:34:01"
+  },
+  {
+    "date": "2025-09-06",
+    "category": "Li-Ag 충전",
+    "status": "진행중",
+    "start_time": "11:28",
+    "end_time": "12:28",
+    "content": "ㅇㅇㅇㅇㅇㅇㅇㅇ",
+    "timestamp": "2025-09-29 11:28:48"
+  },
+  {
+    "date": "2025-05-28",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-05-28 12:00",
+    "end_datetime": "2025-05-28 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT installed on LEUS\n\n원인/조건 (Cause/Condition): Burst observed after venting for alloy charging\n비고 (Remark): Photo record\n실패 여부 (Failed): Yes\n실패 누적 카운트 (Count): 8",
+    "timestamp": "2025-05-28 12:00:00"
+  },
+  {
+    "date": "2025-05-06",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-05-06 12:00",
+    "end_datetime": "2025-05-06 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT during LEUS installation\n\n원인/조건 (Cause/Condition): Second CNT for LEUS\n비고 (Remark): Photo record\n실패 여부 (Failed): No\n실패 누적 카운트 (Count): 7",
+    "timestamp": "2025-05-06 12:00:00"
+  },
+  {
+    "date": "2025-04-30",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-04-30 12:00",
+    "end_datetime": "2025-04-30 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT (Lintec sample) installation\n\n원인/조건 (Cause/Condition): Damaged during commissioning\n비고 (Remark): Photo record\n실패 여부 (Failed): No\n실패 누적 카운트 (Count): 7",
+    "timestamp": "2025-04-30 12:00:00"
+  },
+  {
+    "date": "2025-04-23",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-04-23 12:00",
+    "end_datetime": "2025-04-23 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT filter failure\n\n원인/조건 (Cause/Condition): Burnt mark observed on CNT mount; beam path interference before collector\n비고 (Remark): Photo record\n실패 여부 (Failed): Yes\n실패 누적 카운트 (Count): 7",
+    "timestamp": "2025-04-23 12:00:00"
+  },
+  {
+    "date": "2025-04-08",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-04-08 12:00",
+    "end_datetime": "2025-04-08 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "FST's CNT filter installation\n\n원인/조건 (Cause/Condition): Second and final FST's filter installed\n비고 (Remark): Photo record\n실패 여부 (Failed): No\n실패 누적 카운트 (Count): 6",
+    "timestamp": "2025-04-08 12:00:00"
+  },
+  {
+    "date": "2025-03-26",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-03-26 12:00",
+    "end_datetime": "2025-03-26 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT filter failure\n\n원인/조건 (Cause/Condition): Final FST's filter (installed on Apr 8) failed; particles suspected\n비고 (Remark): Photo record\n실패 여부 (Failed): Yes\n실패 누적 카운트 (Count): 6",
+    "timestamp": "2025-03-26 12:00:00"
+  },
+  {
+    "date": "2025-03-18",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-03-18 12:00",
+    "end_datetime": "2025-03-18 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT filter failure\n\n원인/조건 (Cause/Condition): Unknown cause during in-operation usage\n비고 (Remark): Photo record\n실패 여부 (Failed): Yes\n실패 누적 카운트 (Count): 5",
+    "timestamp": "2025-03-18 12:00:00"
+  },
+  {
+    "date": "2025-03-05",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-03-05 12:00",
+    "end_datetime": "2025-03-05 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "FST's CNT filter installation\n\n원인/조건 (Cause/Condition): Installed new CNT filter (FST's)\n비고 (Remark): Photo record\n실패 여부 (Failed): No\n실패 누적 카운트 (Count): 4",
+    "timestamp": "2025-03-05 12:00:00"
+  },
+  {
+    "date": "2025-02-25",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-02-25 12:00",
+    "end_datetime": "2025-02-25 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT filter failure\n\n원인/조건 (Cause/Condition): Unknown cause during continuous operation\n비고 (Remark): From chat/docs\n실패 여부 (Failed): Yes\n실패 누적 카운트 (Count): 4",
+    "timestamp": "2025-02-25 12:00:00"
+  },
+  {
+    "date": "2025-02-18",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-02-18 12:00",
+    "end_datetime": "2025-02-18 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "New CNT filter installation\n\n원인/조건 (Cause/Condition): Likely damage due to pressure difference\n비고 (Remark): Photo record\n실패 여부 (Failed): No\n실패 누적 카운트 (Count): 3",
+    "timestamp": "2025-02-18 12:00:00"
+  },
+  {
+    "date": "2025-02-05",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-02-05 12:00",
+    "end_datetime": "2025-02-05 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "Docking with AMMI\n\n원인/조건 (Cause/Condition): Normal installation (operation started)\n비고 (Remark): Photo record\n실패 여부 (Failed): No\n실패 누적 카운트 (Count): 3",
+    "timestamp": "2025-02-05 12:00:00"
+  },
+  {
+    "date": "2025-01-21",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-01-21 12:00",
+    "end_datetime": "2025-01-21 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT filter failure\n\n원인/조건 (Cause/Condition): Neglected maintenance, continued operation\n비고 (Remark): Photo record\n실패 여부 (Failed): Yes\n실패 누� 카운트 (Count): 3",
+    "timestamp": "2025-01-21 12:00:00"
+  },
+  {
+    "date": "2025-01-14",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-01-14 12:00",
+    "end_datetime": "2025-01-14 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT filter failure\n\n원인/조건 (Cause/Condition): Change in operating configuration\n비고 (Remark): Photo record\n실패 여부 (Failed): Yes\n실패 누적 카운트 (Count): 2",
+    "timestamp": "2025-01-14 12:00:00"
+  },
+  {
+    "date": "2025-01-07",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2025-01-07 12:00",
+    "end_datetime": "2025-01-07 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "CNT filter failure\n\n원인/조건 (Cause/Condition): Pressure spike due to relief valve operation\n비고 (Remark): Photo record\n실패 여부 (Failed): Yes\n실패 누적 카운트 (Count): 1",
+    "timestamp": "2025-01-07 12:00:00"
+  },
+  {
+    "date": "2024-11-01",
+    "category": "CNT 장착",
+    "status": "완료",
+    "start_datetime": "2024-11-01 12:00",
+    "end_datetime": "2024-11-01 12:00",
+    "start_time": "12:00",
+    "end_time": "12:00",
+    "content": "Initial CNT filter installation on TEUS\n\n원인/조건 (Cause/Condition): Normal installation (operation started)\n비고 (Remark): Photo record\n실패 여부 (Failed): No\n실패 누적 카운트 (Count): 0",
+    "timestamp": "2024-11-01 12:00:00"
+  }
+]
