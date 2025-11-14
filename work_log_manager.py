@@ -1,1316 +1,774 @@
 """
-작업 로그 관리 모듈
-작업 로그 입력, 저장, 로드, 내보내기 기능을 제공
+작업 로그 관리 모듈 (PyQt5 버전)
+작업 로그 입력, 저장, 로드, 내보내기, 달력 보기 기능을 제공
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from __future__ import annotations
+
 import datetime
 import json
-import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import Qt
+
+from work_log_calendar_view import open_work_log_calendar
+
+CATEGORY_OPTIONS: List[str] = [
+    "Li-Ag 충전",
+    "IR Align",
+    "EUV Align",
+    "CNT 장착",
+    "기타 장비 점검",
+]
+
+STATUS_OPTIONS: List[str] = ["진행중", "완료"]
 
 
 class WorkLogManager:
-    """작업 로그 관리 클래스"""
-    
-    def __init__(self, parent_root=None):
-        """
-        초기화
-        Args:
-            parent_root: 부모 tkinter root 윈도우
-        """
-        self.parent_root = parent_root
-        self.log_file_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), 
-            "work_log.json"
-        )
-        
-        # 초기화 시 로그 파일 상태 출력
+    """작업 로그 관리 컨트롤러 클래스."""
+
+    def __init__(self, parent_widget: Optional[Any] = None) -> None:
+        """컨트롤러를 초기화한다."""
+        if parent_widget is not None and not isinstance(parent_widget, QtWidgets.QWidget):
+            self.parent_widget = None
+        else:
+            self.parent_widget = parent_widget
+        self.log_file_path = Path(__file__).resolve().parent / "work_log.json"
+
         print(f"작업 로그 파일: {self.log_file_path}")
-        if os.path.exists(self.log_file_path):
+        if self.log_file_path.exists():
             logs = self.load_work_logs()
             print(f"기존 로그 {len(logs)}개 로드됨")
         else:
             print("새 작업 로그 파일이 생성됩니다.")
-    
-    def load_work_logs(self):
-        """기존 작업 로그를 JSON 파일에서 로드"""
-        if os.path.exists(self.log_file_path):
-            try:
-                with open(self.log_file_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"로그 파일 읽기 오류: {e}")
-                return []
+
+    def load_work_logs(self) -> List[Dict[str, Any]]:
+        """JSON 파일에서 작업 로그를 읽어 리스트로 반환한다."""
+        if not self.log_file_path.exists():
+            return []
+        try:
+            with self.log_file_path.open("r", encoding="utf-8") as file:
+                return json.load(file)
+        except Exception as exc:  # noqa: BLE001
+            print(f"로그 파일 읽기 오류: {exc}")
         return []
-    
-    def save_work_logs(self, logs):
-        """작업 로그를 JSON 파일에 저장"""
+
+    def save_work_logs(self, logs: List[Dict[str, Any]]) -> bool:
+        """작업 로그 리스트를 JSON 파일로 저장한다."""
         try:
-            with open(self.log_file_path, 'w', encoding='utf-8') as f:
-                json.dump(logs, f, ensure_ascii=False, indent=2)
+            with self.log_file_path.open("w", encoding="utf-8") as file:
+                json.dump(logs, file, ensure_ascii=False, indent=2)
             return True
-        except Exception as e:
-            print(f"로그 파일 저장 오류: {e}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"로그 파일 저장 오류: {exc}")
             return False
-    
-    def show_work_log(self):
-        """작업 로그 입력/관리 창 표시"""
-        if not self.parent_root:
-            print("부모 윈도우가 설정되지 않았습니다.")
-            return
-            
-        log_win = tk.Toplevel(self.parent_root)
-        log_win.title("작업 로그 관리")
-        log_win.geometry("1200x800")
-        log_win.transient(self.parent_root)
-        
-        # 메인 프레임
-        main_frame = ttk.Frame(log_win)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # 상단: 새 로그 입력 섹션
-        input_frame = ttk.LabelFrame(main_frame, text="새 작업 로그 입력", padding=10)
-        input_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # 날짜 입력 UI 생성
-        date_vars = self._create_date_input(input_frame)
-        
-        # 카테고리 및 상태 선택 UI 생성
-        category_vars = self._create_category_input(input_frame)
-        
-        # 시간 입력 UI 생성
-        time_vars = self._create_time_input(input_frame)
-        
-        # 상태 변경 시 라벨 업데이트 함수
-        def on_status_change(*args):
-            status = category_vars['status'].get()
-            if status == "완료":
-                time_vars['end_label'].config(text="완료 시각:")
-            else:
-                time_vars['end_label'].config(text="예상 종료:")
-        
-        category_vars['status'].trace('w', on_status_change)
-        
-        # 작업 내용 입력 UI 생성
-        content_text = self._create_content_input(input_frame)
-        
-        # 하단: 기존 로그 목록 표시
-        log_tree = self._create_log_list(main_frame)
-        
-        # 로그 새로고침 함수
-        def refresh_log_list():
-            self._refresh_log_list(log_tree, stats_label)
-        
-        # 로그 추가 함수
-        def add_log():
-            self._add_log(date_vars, category_vars, time_vars, content_text, log_win, refresh_log_list)
-        
-        # 로그 삭제 함수  
-        def delete_selected_log():
-            self._delete_selected_log(log_tree, log_win, refresh_log_list)
-        
-        # 로그 수정 함수
-        def edit_selected_log():
-            self._edit_selected_log(log_tree, log_win, refresh_log_list)
-        
-        # 로그 내보내기 함수
-        def export_logs():
-            self._export_logs(log_win)
-        
-        # 입력 버튼 생성
-        self._create_input_buttons(input_frame, add_log, content_text)
-        
-        # 하단 버튼 생성 및 stats_label 받기
-        stats_label = self._create_bottom_buttons(self._current_log_list_frame, refresh_log_list, delete_selected_log, edit_selected_log, export_logs)
-        
-        # 로그 상세보기 이벤트 바인딩
-        log_tree.bind('<Double-1>', lambda e: self._show_log_detail(e, log_tree, log_win))
-        
-        # 초기 로그 목록 로드
-        refresh_log_list()
-        
-        # 엔터키로 로그 추가
-        content_text.bind('<Control-Return>', lambda e: add_log())
-        
-        # 창 포커스
-        log_win.focus_set()
-        content_text.focus()
-    
-    def _create_date_input(self, parent_frame):
-        """날짜 입력 UI 생성"""
-        date_frame = ttk.Frame(parent_frame)
-        date_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        ttk.Label(date_frame, text="날짜:", width=10).pack(side=tk.LEFT)
-        
-        # 오늘 날짜를 기본값으로
-        today = datetime.datetime.now()
-        
-        year_var = tk.StringVar(value=str(today.year))
-        month_var = tk.StringVar(value=f"{today.month:02d}")
-        day_var = tk.StringVar(value=f"{today.day:02d}")
-        
-        year_spinbox = tk.Spinbox(date_frame, from_=2020, to=2030, width=6, textvariable=year_var)
-        year_spinbox.pack(side=tk.LEFT, padx=(0, 5))
-        
-        ttk.Label(date_frame, text="년").pack(side=tk.LEFT, padx=(0, 10))
-        
-        month_spinbox = tk.Spinbox(date_frame, from_=1, to=12, width=4, textvariable=month_var, format="%02.0f")
-        month_spinbox.pack(side=tk.LEFT, padx=(0, 5))
-        
-        ttk.Label(date_frame, text="월").pack(side=tk.LEFT, padx=(0, 10))
-        
-        day_spinbox = tk.Spinbox(date_frame, from_=1, to=31, width=4, textvariable=day_var, format="%02.0f")
-        day_spinbox.pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(date_frame, text="일").pack(side=tk.LEFT, padx=(0, 10))
-        
-        # 현재 시간을 기본값으로 하는 버튼
-        def set_today():
-            now = datetime.datetime.now()
-            year_var.set(str(now.year))
-            month_var.set(f"{now.month:02d}")
-            day_var.set(f"{now.day:02d}")
-        
-        today_btn = ttk.Button(date_frame, text="오늘", command=set_today, width=8)
-        today_btn.pack(side=tk.LEFT, padx=(20, 0))
-        
-        return {'year': year_var, 'month': month_var, 'day': day_var}
-    
-    def _create_time_input(self, parent_frame):
-        """시작/종료 시간 입력 UI 생성 (날짜 포함)"""
-        time_frame = ttk.LabelFrame(parent_frame, text="작업 시간", padding=5)
-        time_frame.pack(fill=tk.X, pady=(5, 5))
-        
-        # 시작 시간
-        start_frame = ttk.Frame(time_frame)
-        start_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(start_frame, text="시작:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-        
-        start_datetime_frame = ttk.Frame(start_frame)
-        start_datetime_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        # 시작 날짜
-        ttk.Label(start_datetime_frame, text="날짜:", width=8).grid(row=0, column=0, sticky='w', padx=(0, 5))
-        
-        now = datetime.datetime.now()
-        start_year_var = tk.StringVar(value=str(now.year))
-        start_month_var = tk.StringVar(value=f"{now.month:02d}")
-        start_day_var = tk.StringVar(value=f"{now.day:02d}")
-        
-        start_year_spin = tk.Spinbox(start_datetime_frame, from_=2020, to=2030, width=6, textvariable=start_year_var)
-        start_year_spin.grid(row=0, column=1, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="년").grid(row=0, column=2, padx=(0, 8))
-        
-        start_month_spin = tk.Spinbox(start_datetime_frame, from_=1, to=12, width=4, textvariable=start_month_var, format="%02.0f")
-        start_month_spin.grid(row=0, column=3, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="월").grid(row=0, column=4, padx=(0, 8))
-        
-        start_day_spin = tk.Spinbox(start_datetime_frame, from_=1, to=31, width=4, textvariable=start_day_var, format="%02.0f")
-        start_day_spin.grid(row=0, column=5, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="일").grid(row=0, column=6, padx=(0, 15))
-        
-        # 시작 시간
-        ttk.Label(start_datetime_frame, text="시각:", width=8).grid(row=0, column=7, sticky='w', padx=(0, 5))
-        
-        start_hour_var = tk.StringVar(value=f"{now.hour:02d}")
-        start_min_var = tk.StringVar(value=f"{now.minute:02d}")
-        
-        start_hour_spin = tk.Spinbox(start_datetime_frame, from_=0, to=23, width=4, textvariable=start_hour_var, format="%02.0f")
-        start_hour_spin.grid(row=0, column=8, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="시").grid(row=0, column=9, padx=(0, 8))
-        
-        start_min_spin = tk.Spinbox(start_datetime_frame, from_=0, to=59, width=4, textvariable=start_min_var, format="%02.0f")
-        start_min_spin.grid(row=0, column=10, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="분").grid(row=0, column=11, padx=(0, 10))
-        
-        def set_current_datetime():
-            current = datetime.datetime.now()
-            start_year_var.set(str(current.year))
-            start_month_var.set(f"{current.month:02d}")
-            start_day_var.set(f"{current.day:02d}")
-            start_hour_var.set(f"{current.hour:02d}")
-            start_min_var.set(f"{current.minute:02d}")
-        
-        current_btn = ttk.Button(start_datetime_frame, text="현재", command=set_current_datetime, width=6)
-        current_btn.grid(row=0, column=12, padx=(10, 0))
-        
-        # 종료/예상종료 시간
-        end_frame = ttk.Frame(time_frame)
-        end_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        end_label = ttk.Label(end_frame, text="예상 종료:", font=('Arial', 10, 'bold'))
-        end_label.pack(anchor=tk.W)
-        
-        end_datetime_frame = ttk.Frame(end_frame)
-        end_datetime_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        # 종료 날짜
-        ttk.Label(end_datetime_frame, text="날짜:", width=8).grid(row=0, column=0, sticky='w', padx=(0, 5))
-        
-        # 기본적으로 시작 날짜와 동일하게 설정 (하루 후로 설정할 수도 있음)
-        end_year_var = tk.StringVar(value=str(now.year))
-        end_month_var = tk.StringVar(value=f"{now.month:02d}")
-        end_day_var = tk.StringVar(value=f"{now.day:02d}")
-        
-        end_year_spin = tk.Spinbox(end_datetime_frame, from_=2020, to=2030, width=6, textvariable=end_year_var)
-        end_year_spin.grid(row=0, column=1, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="년").grid(row=0, column=2, padx=(0, 8))
-        
-        end_month_spin = tk.Spinbox(end_datetime_frame, from_=1, to=12, width=4, textvariable=end_month_var, format="%02.0f")
-        end_month_spin.grid(row=0, column=3, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="월").grid(row=0, column=4, padx=(0, 8))
-        
-        end_day_spin = tk.Spinbox(end_datetime_frame, from_=1, to=31, width=4, textvariable=end_day_var, format="%02.0f")
-        end_day_spin.grid(row=0, column=5, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="일").grid(row=0, column=6, padx=(0, 15))
-        
-        # 종료 시간
-        ttk.Label(end_datetime_frame, text="시각:", width=8).grid(row=0, column=7, sticky='w', padx=(0, 5))
-        
-        end_hour_var = tk.StringVar(value=f"{(now.hour + 1) % 24:02d}")
-        end_min_var = tk.StringVar(value=f"{now.minute:02d}")
-        
-        end_hour_spin = tk.Spinbox(end_datetime_frame, from_=0, to=23, width=4, textvariable=end_hour_var, format="%02.0f")
-        end_hour_spin.grid(row=0, column=8, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="시").grid(row=0, column=9, padx=(0, 8))
-        
-        end_min_spin = tk.Spinbox(end_datetime_frame, from_=0, to=59, width=4, textvariable=end_min_var, format="%02.0f")
-        end_min_spin.grid(row=0, column=10, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="분").grid(row=0, column=11, padx=(0, 10))
-        
-        # 편의 버튼들
-        convenience_frame = ttk.Frame(end_datetime_frame)
-        convenience_frame.grid(row=0, column=12, padx=(10, 0))
-        
-        def set_same_day():
-            """시작 날짜와 같은 날로 설정"""
-            end_year_var.set(start_year_var.get())
-            end_month_var.set(start_month_var.get())
-            end_day_var.set(start_day_var.get())
-        
-        def set_next_day():
-            """다음 날로 설정"""
-            try:
-                start_date = datetime.datetime(
-                    int(start_year_var.get()),
-                    int(start_month_var.get()),
-                    int(start_day_var.get())
-                )
-                next_date = start_date + datetime.timedelta(days=1)
-                end_year_var.set(str(next_date.year))
-                end_month_var.set(f"{next_date.month:02d}")
-                end_day_var.set(f"{next_date.day:02d}")
-            except ValueError:
-                pass  # 잘못된 날짜인 경우 무시
-        
-        same_day_btn = ttk.Button(convenience_frame, text="당일", command=set_same_day, width=6)
-        same_day_btn.pack(side=tk.TOP, pady=(0, 2))
-        
-        next_day_btn = ttk.Button(convenience_frame, text="다음날", command=set_next_day, width=6)
-        next_day_btn.pack(side=tk.TOP)
-        
-        return {
-            'start_year': start_year_var, 'start_month': start_month_var, 'start_day': start_day_var,
-            'start_hour': start_hour_var, 'start_min': start_min_var,
-            'end_year': end_year_var, 'end_month': end_month_var, 'end_day': end_day_var,
-            'end_hour': end_hour_var, 'end_min': end_min_var,
-            'end_label': end_label
-        }
 
-    def _create_time_input_for_edit(self, parent_frame, log_data):
-        """수정용 시간 입력 UI 생성 (날짜 포함)"""
-        time_frame = ttk.LabelFrame(parent_frame, text="작업 시간", padding=5)
-        time_frame.pack(fill=tk.X, pady=(5, 5))
-        
-        # 기존 데이터에서 날짜/시간 파싱
-        start_datetime_str = log_data.get('start_datetime', '')
-        end_datetime_str = log_data.get('end_datetime', '')
-        
-        # 기존 데이터 호환성 처리
-        if not start_datetime_str and 'start_time' in log_data:
-            # 기존 형식: 날짜는 로그 날짜, 시간만 별도
-            start_datetime_str = f"{log_data['date']} {log_data['start_time']}"
-        if not end_datetime_str and 'end_time' in log_data:
-            end_datetime_str = f"{log_data['date']} {log_data['end_time']}"
-        
-        # 기본값 설정
-        try:
-            start_dt = datetime.datetime.strptime(start_datetime_str, "%Y-%m-%d %H:%M")
-        except:
-            start_dt = datetime.datetime.now()
-        
-        try:
-            end_dt = datetime.datetime.strptime(end_datetime_str, "%Y-%m-%d %H:%M")
-        except:
-            end_dt = start_dt + datetime.timedelta(hours=1)
-        
-        # 시작 시간
-        start_frame = ttk.Frame(time_frame)
-        start_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(start_frame, text="시작:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-        
-        start_datetime_frame = ttk.Frame(start_frame)
-        start_datetime_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        # 시작 날짜
-        ttk.Label(start_datetime_frame, text="날짜:", width=8).grid(row=0, column=0, sticky='w', padx=(0, 5))
-        
-        now = datetime.datetime.now()
-        start_year_var = tk.StringVar(value=str(now.year))
-        start_month_var = tk.StringVar(value=f"{now.month:02d}")
-        start_day_var = tk.StringVar(value=f"{now.day:02d}")
-        
-        start_year_spin = tk.Spinbox(start_datetime_frame, from_=2020, to=2030, width=6, textvariable=start_year_var)
-        start_year_spin.grid(row=0, column=1, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="년").grid(row=0, column=2, padx=(0, 8))
-        
-        start_month_spin = tk.Spinbox(start_datetime_frame, from_=1, to=12, width=4, textvariable=start_month_var, format="%02.0f")
-        start_month_spin.grid(row=0, column=3, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="월").grid(row=0, column=4, padx=(0, 8))
-        
-        start_day_spin = tk.Spinbox(start_datetime_frame, from_=1, to=31, width=4, textvariable=start_day_var, format="%02.0f")
-        start_day_spin.grid(row=0, column=5, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="일").grid(row=0, column=6, padx=(0, 15))
-        
-        # 시작 시간
-        ttk.Label(start_datetime_frame, text="시각:", width=8).grid(row=0, column=7, sticky='w', padx=(0, 5))
-        
-        start_hour_var = tk.StringVar(value=f"{start_dt.hour:02d}")
-        start_min_var = tk.StringVar(value=f"{start_dt.minute:02d}")
-        
-        start_hour_spin = tk.Spinbox(start_datetime_frame, from_=0, to=23, width=4, textvariable=start_hour_var, format="%02.0f")
-        start_hour_spin.grid(row=0, column=8, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="시").grid(row=0, column=9, padx=(0, 8))
-        
-        start_min_spin = tk.Spinbox(start_datetime_frame, from_=0, to=59, width=4, textvariable=start_min_var, format="%02.0f")
-        start_min_spin.grid(row=0, column=10, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="분").grid(row=0, column=11)
-        
-        # 종료 시간
-        end_frame = ttk.Frame(time_frame)
-        end_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        status = log_data.get('status', '진행중')
-        end_label_text = "완료:" if status == "완료" else "예상 종료:"
-        end_label = ttk.Label(end_frame, text=end_label_text, font=('Arial', 10, 'bold'))
-        end_label.pack(anchor=tk.W)
-        
-        end_datetime_frame = ttk.Frame(end_frame)
-        end_datetime_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        # 종료 날짜
-        ttk.Label(end_datetime_frame, text="날짜:", width=8).grid(row=0, column=0, sticky='w', padx=(0, 5))
-        
-        end_year_var = tk.StringVar(value=str(end_dt.year))
-        end_month_var = tk.StringVar(value=f"{end_dt.month:02d}")
-        end_day_var = tk.StringVar(value=f"{end_dt.day:02d}")
-        
-        end_year_spin = tk.Spinbox(end_datetime_frame, from_=2020, to=2030, width=6, textvariable=end_year_var)
-        end_year_spin.grid(row=0, column=1, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="년").grid(row=0, column=2, padx=(0, 8))
-        
-        end_month_spin = tk.Spinbox(end_datetime_frame, from_=1, to=12, width=4, textvariable=end_month_var, format="%02.0f")
-        end_month_spin.grid(row=0, column=3, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="월").grid(row=0, column=4, padx=(0, 8))
-        
-        end_day_spin = tk.Spinbox(end_datetime_frame, from_=1, to=31, width=4, textvariable=end_day_var, format="%02.0f")
-        end_day_spin.grid(row=0, column=5, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="일").grid(row=0, column=6, padx=(0, 15))
-        
-        # 종료 시간
-        ttk.Label(end_datetime_frame, text="시각:", width=8).grid(row=0, column=7, sticky='w', padx=(0, 5))
-        
-        end_hour_var = tk.StringVar(value=f"{end_dt.hour:02d}")
-        end_min_var = tk.StringVar(value=f"{end_dt.minute:02d}")
-        
-        end_hour_spin = tk.Spinbox(end_datetime_frame, from_=0, to=23, width=4, textvariable=end_hour_var, format="%02.0f")
-        end_hour_spin.grid(row=0, column=8, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="시").grid(row=0, column=9, padx=(0, 8))
-        
-        end_min_spin = tk.Spinbox(end_datetime_frame, from_=0, to=59, width=4, textvariable=end_min_var, format="%02.0f")
-        end_min_spin.grid(row=0, column=10, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="분").grid(row=0, column=11)
-        
-        # 편의 버튼들
-        convenience_frame = ttk.Frame(end_datetime_frame)
-        convenience_frame.grid(row=0, column=12, padx=(10, 0))
-        
-        def set_same_day():
-            """시작 날짜와 같은 날로 설정"""
-            end_year_var.set(start_year_var.get())
-            end_month_var.set(start_month_var.get())
-            end_day_var.set(start_day_var.get())
-        
-        def set_next_day():
-            """다음 날로 설정"""
-            try:
-                start_date = datetime.datetime(
-                    int(start_year_var.get()),
-                    int(start_month_var.get()),
-                    int(start_day_var.get())
-                )
-                next_date = start_date + datetime.timedelta(days=1)
-                end_year_var.set(str(next_date.year))
-                end_month_var.set(f"{next_date.month:02d}")
-                end_day_var.set(f"{next_date.day:02d}")
-            except ValueError:
-                pass  # 잘못된 날짜인 경우 무시
-        
-        same_day_btn = ttk.Button(convenience_frame, text="당일", command=set_same_day, width=6)
-        same_day_btn.pack(side=tk.TOP, pady=(0, 2))
-        
-        next_day_btn = ttk.Button(convenience_frame, text="다음날", command=set_next_day, width=6)
-        next_day_btn.pack(side=tk.TOP)
-        
-        return {
-            'start_year': start_year_var, 'start_month': start_month_var, 'start_day': start_day_var,
-            'start_hour': start_hour_var, 'start_min': start_min_var,
-            'end_year': end_year_var, 'end_month': end_month_var, 'end_day': end_day_var,
-            'end_hour': end_hour_var, 'end_min': end_min_var,
-            'end_label': end_label
-        }
+    def sort_logs(self, logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """작업 로그 리스트를 시작 시각 기준으로 정렬한다."""
+        return sorted(logs, key=self._log_sort_key, reverse=True)
 
-    def _create_category_input(self, parent_frame):
-        """카테고리 및 상태 선택 UI 생성"""
-        category_frame = ttk.Frame(parent_frame)
-        category_frame.pack(fill=tk.X, pady=(5, 5))
+    @staticmethod
+    def _log_sort_key(log: Dict[str, Any]) -> datetime.datetime:
+        """정렬을 위한 기준 시각을 계산한다."""
+        start_value = log.get("start_datetime")
+        if start_value:
+            parsed = WorkLogManager._parse_datetime(start_value)
+            if parsed is not None:
+                return parsed
 
-        # 작업 종류 카테고리
-        ttk.Label(category_frame, text="작업 종류:", width=10).pack(side=tk.LEFT)
-        
-        category_var = tk.StringVar()
-        categories = ["Li-Ag 충전", "IR Align", "EUV Align", "기타 장비 점검"]
-        category_combo = ttk.Combobox(category_frame, textvariable=category_var, values=categories, width=15)
-        category_combo.pack(side=tk.LEFT, padx=(0, 20))
-        category_combo.current(0)  # 기본값 설정
-        
-        # 작업 상태
-        ttk.Label(category_frame, text="상태:", width=8).pack(side=tk.LEFT)
-        
-        status_var = tk.StringVar()
-        statuses = ["진행중", "완료"]
-        status_combo = ttk.Combobox(category_frame, textvariable=status_var, values=statuses, width=10)
-        status_combo.pack(side=tk.LEFT)
-        status_combo.current(0)  # 기본값: 진행중
-        
-        return {'category': category_var, 'status': status_var}
-    
-    def _create_content_input(self, parent_frame):
-        """작업 내용 입력 UI 생성"""
-        content_frame = ttk.Frame(parent_frame)
-        content_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
-        
-        ttk.Label(content_frame, text="작업 내용:").pack(anchor=tk.W)
-        
-        content_text_frame = ttk.Frame(content_frame)
-        content_text_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
-        
-        content_text = tk.Text(content_text_frame, height=4, wrap=tk.WORD, font=('Arial', 10))
-        content_scrollbar = ttk.Scrollbar(content_text_frame, orient="vertical", command=content_text.yview)
-        content_text.configure(yscrollcommand=content_scrollbar.set)
-        
-        content_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        content_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        return content_text
-    
-    def _create_content_input_for_edit(self, parent_frame, log_data):
-        """수정용 작업 내용 입력 UI 생성"""
-        content_frame = ttk.Frame(parent_frame)
-        content_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
-        
-        ttk.Label(content_frame, text="작업 내용:").pack(anchor=tk.W)
-        
-        content_text_frame = ttk.Frame(content_frame)
-        content_text_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
-        
-        content_text = tk.Text(content_text_frame, height=6, wrap=tk.WORD, font=('Arial', 10))
-        content_scrollbar = ttk.Scrollbar(content_text_frame, orient="vertical", command=content_text.yview)
-        content_text.configure(yscrollcommand=content_scrollbar.set)
-        
-        # 기존 내용 입력
-        content_text.insert(tk.END, log_data.get('content', ''))
-        
-        content_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        content_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        return content_text
-    
-    def _create_input_buttons(self, parent_frame, add_log_func, content_text):
-        """입력 버튼 생성"""
-        input_btn_frame = ttk.Frame(parent_frame)
-        input_btn_frame.pack(fill=tk.X)
-        
-        add_btn = ttk.Button(input_btn_frame, text="로그 추가", command=add_log_func)
-        add_btn.pack(side=tk.RIGHT)
-        
-        clear_btn = ttk.Button(input_btn_frame, text="입력 초기화", 
-                              command=lambda: content_text.delete("1.0", tk.END))
-        clear_btn.pack(side=tk.RIGHT, padx=(0, 5))
-    
-    def _create_log_list(self, parent_frame):
-        """로그 목록 UI 생성"""
-        log_list_frame = ttk.LabelFrame(parent_frame, text="작업 로그 이력", padding=10)
-        log_list_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # 로그 목록 Treeview
-        log_columns = ('날짜', '작업 종류', '상태', '작업시간', '작업내용', '등록시간')
-        log_tree = ttk.Treeview(log_list_frame, columns=log_columns, show='headings', height=15)
-        
-        # 컬럼 설정
-        log_tree.heading('날짜', text='날짜')
-        log_tree.heading('작업 종류', text='작업 종류')
-        log_tree.heading('상태', text='상태')
-        log_tree.heading('작업시간', text='작업시간')
-        log_tree.heading('작업내용', text='작업 내용')
-        log_tree.heading('등록시간', text='등록 시간')
-        
-        log_tree.column('날짜', width=100)
-        log_tree.column('작업 종류', width=100)
-        log_tree.column('상태', width=70)
-        log_tree.column('작업시간', width=120)
-        log_tree.column('작업내용', width=300)
-        log_tree.column('등록시간', width=150)
-        
-        # 스크롤바
-        log_v_scrollbar = ttk.Scrollbar(log_list_frame, orient="vertical", command=log_tree.yview)
-        log_h_scrollbar = ttk.Scrollbar(log_list_frame, orient="horizontal", command=log_tree.xview)
-        log_tree.configure(yscrollcommand=log_v_scrollbar.set, xscrollcommand=log_h_scrollbar.set)
-        
-        # 그리드 배치
-        log_tree.grid(row=0, column=0, sticky='nsew')
-        log_v_scrollbar.grid(row=0, column=1, sticky='ns')
-        log_h_scrollbar.grid(row=1, column=0, sticky='ew')
-        
-        log_list_frame.grid_rowconfigure(0, weight=1)
-        log_list_frame.grid_columnconfigure(0, weight=1)
-        
-        # log_list_frame을 나중에 사용하기 위해 저장
-        self._current_log_list_frame = log_list_frame
-        
-        return log_tree
-    
-    def _create_bottom_buttons(self, log_list_frame, refresh_func, delete_func, edit_func, export_func):
-        """하단 버튼들 생성"""
-        bottom_frame = ttk.Frame(log_list_frame)
-        bottom_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(10, 0))
-        
-        stats_label = ttk.Label(bottom_frame, text="", font=('Arial', 9))
-        stats_label.pack(side=tk.LEFT)
-        
-        # 버튼들
-        export_btn = ttk.Button(bottom_frame, text="로그 내보내기", command=export_func)
-        export_btn.pack(side=tk.RIGHT)
-        
-        edit_btn = ttk.Button(bottom_frame, text="선택 로그 수정", command=edit_func)
-        edit_btn.pack(side=tk.RIGHT, padx=(0, 5))
-        
-        delete_btn = ttk.Button(bottom_frame, text="선택 로그 삭제", command=delete_func)
-        delete_btn.pack(side=tk.RIGHT, padx=(0, 5))
-        
-        refresh_btn = ttk.Button(bottom_frame, text="새로고침", command=refresh_func)
-        refresh_btn.pack(side=tk.RIGHT, padx=(0, 5))
-        
-        return stats_label
-    
-    def _add_log(self, date_vars, category_vars, time_vars, content_text, parent_win, refresh_func):
-        """로그 추가"""
-        try:
-            # 입력 검증
-            date_str = f"{date_vars['year'].get()}-{date_vars['month'].get()}-{date_vars['day'].get()}"
-            category = category_vars['category'].get().strip()
-            status = category_vars['status'].get().strip()
-            content = content_text.get("1.0", tk.END).strip()
-            
-            # 시작/종료 날짜+시간 정보
-            start_date = f"{time_vars['start_year'].get()}-{time_vars['start_month'].get()}-{time_vars['start_day'].get()}"
-            start_time = f"{time_vars['start_hour'].get()}:{time_vars['start_min'].get()}"
-            start_datetime = f"{start_date} {start_time}"
-            
-            end_date = f"{time_vars['end_year'].get()}-{time_vars['end_month'].get()}-{time_vars['end_day'].get()}"
-            end_time = f"{time_vars['end_hour'].get()}:{time_vars['end_min'].get()}"
-            end_datetime = f"{end_date} {end_time}"
-            
-            if not category:
-                messagebox.showwarning("입력 오류", "장비 카테고리를 선택하세요.", parent=parent_win)
-                return
-            
-            if not status:
-                messagebox.showwarning("입력 오류", "작업 상태를 선택하세요.", parent=parent_win)
-                return
-            
-            if not content:
-                messagebox.showwarning("입력 오류", "작업 내용을 입력하세요.", parent=parent_win)
-                content_text.focus()
-                return
-            
-            # 날짜 유효성 검증
+        date_value = log.get("date")
+        if date_value:
             try:
-                datetime.datetime.strptime(date_str, "%Y-%m-%d")
-                datetime.datetime.strptime(start_datetime, "%Y-%m-%d %H:%M")
-                datetime.datetime.strptime(end_datetime, "%Y-%m-%d %H:%M")
+                return datetime.datetime.strptime(date_value, "%Y-%m-%d")
             except ValueError:
-                messagebox.showerror("날짜/시간 오류", "올바른 날짜와 시간을 입력하세요.", parent=parent_win)
-                return
-            
-            # 시작 시간이 종료 시간보다 늦은지 확인
-            start_dt = datetime.datetime.strptime(start_datetime, "%Y-%m-%d %H:%M")
-            end_dt = datetime.datetime.strptime(end_datetime, "%Y-%m-%d %H:%M")
-            
-            if start_dt >= end_dt:
-                messagebox.showwarning("시간 오류", "종료 시간은 시작 시간보다 늦어야 합니다.", parent=parent_win)
-                return
-            
-            # 새 로그 항목 생성 (기존 호환성을 위해 기존 필드도 유지)
-            new_log = {
-                "date": date_str,
-                "category": category,
-                "status": status,
-                "start_datetime": start_datetime,  # 새 필드
-                "end_datetime": end_datetime,      # 새 필드
-                "start_time": start_time,          # 기존 호환성
-                "end_time": end_time,              # 기존 호환성
-                "content": content,
-                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-            # 기존 로그 로드 후 추가
-            logs = self.load_work_logs()
-            logs.append(new_log)
-            
-            # 날짜순으로 정렬 (최신이 위로)
-            logs.sort(key=lambda x: x["date"], reverse=True)
-            
-            # 저장
-            if self.save_work_logs(logs):
-                messagebox.showinfo("저장 완료", "작업 로그가 저장되었습니다.", parent=parent_win)
-                
-                # 입력 필드 초기화
-                content_text.delete("1.0", tk.END)
-                
-                # 로그 목록 새로고침
-                refresh_func()
-            else:
-                messagebox.showerror("저장 실패", "로그 저장에 실패했습니다.", parent=parent_win)
-                
-        except Exception as e:
-            messagebox.showerror("오류", f"로그 추가 중 오류가 발생했습니다:\n{e}", parent=parent_win)
-    
-    def _refresh_log_list(self, log_tree, stats_label):
-        """로그 목록을 새로고침"""
-        # 기존 항목 삭제
-        for item in log_tree.get_children():
-            log_tree.delete(item)
-        
-        # 로그 로드 및 표시
-        logs = self.load_work_logs()
-        for log in logs:
-            # 작업 내용이 너무 길면 줄여서 표시
-            content_preview = log['content'][:80] + ('...' if len(log['content']) > 80 else '')
-            
-            # 시간 정보 처리 (새 형식 우선, 기존 형식 호환)
-            if 'start_datetime' in log and 'end_datetime' in log:
-                status = log.get('status', '미지정')
-                try:
-                    start_dt = datetime.datetime.strptime(log['start_datetime'], "%Y-%m-%d %H:%M")
-                    end_dt = datetime.datetime.strptime(log['end_datetime'], "%Y-%m-%d %H:%M")
-                    
-                    # 같은 날이면 시간만, 다른 날이면 날짜+시간
-                    if start_dt.date() == end_dt.date():
-                        time_info = f"{start_dt.strftime('%H:%M')} ~ {end_dt.strftime('%H:%M')}"
-                    else:
-                        time_info = f"{start_dt.strftime('%m/%d %H:%M')} ~ {end_dt.strftime('%m/%d %H:%M')}"
-                    
-                    if status == "진행중":
-                        time_info += " (예상)"
-                        
-                except ValueError:
-                    time_info = "시간 형식 오류"
-                    
-            elif 'start_time' in log and 'end_time' in log:
-                # 기존 형식 호환
-                status = log.get('status', '미지정')
-                if status == "완료":
-                    time_info = f"{log['start_time']} ~ {log['end_time']}"
-                else:
-                    time_info = f"{log['start_time']} ~ {log['end_time']} (예상)"
-            else:
-                time_info = "시간 미기록"
-            
-            log_tree.insert('', tk.END, values=(
-                log['date'],
-                log.get('category', '미분류'),
-                log.get('status', '미지정'),
-                time_info,
-                content_preview,
-                log['timestamp']
-            ))
-        
-        # 통계 정보 업데이트
-        total_logs = len(logs)
-        if total_logs > 0:
-            latest_date = logs[0]['date']  # 이미 날짜순 정렬됨
-            
-            # 상태별 통계
-            in_progress = sum(1 for log in logs if log.get('status') == '진행중')
-            completed = sum(1 for log in logs if log.get('status') == '완료')
-            
-            stats_text = f"총 {total_logs}개 로그 (진행중: {in_progress}, 완료: {completed}), 최근: {latest_date}"
-        else:
-            stats_text = "등록된 로그가 없습니다."
-        
-        stats_label.config(text=stats_text)
-    
-    def _delete_selected_log(self, log_tree, parent_win, refresh_func):
-        """선택된 로그 삭제"""
-        selection = log_tree.selection()
-        if not selection:
-            messagebox.showwarning("선택 오류", "삭제할 로그를 선택하세요.", parent=parent_win)
-            return
-        
-        if not messagebox.askyesno("삭제 확인", "선택된 로그를 삭제하시겠습니까?", parent=parent_win):
-            return
-        
-        try:
-            # 선택된 로그 정보 가져오기
-            item = log_tree.item(selection[0])
-            values = item['values']
-            
-            logs = self.load_work_logs()
-            # 해당 로그를 찾아서 삭제
-            for i, log in enumerate(logs):
-                if (log['date'] == values[0] and 
-                    log.get('category', '미분류') == values[1] and
-                    log['timestamp'] == values[5]):
-                    logs.pop(i)
-                    break
-            
-            if self.save_work_logs(logs):
-                messagebox.showinfo("삭제 완료", "로그가 삭제되었습니다.", parent=parent_win)
-                refresh_func()
-            else:
-                messagebox.showerror("삭제 실패", "로그 삭제에 실패했습니다.", parent=parent_win)
-                
-        except Exception as e:
-            messagebox.showerror("오류", f"로그 삭제 중 오류가 발생했습니다:\n{e}", parent=parent_win)
-    
-    def _edit_selected_log(self, log_tree, parent_win, refresh_func):
-        """선택된 로그 수정"""
-        selection = log_tree.selection()
-        if not selection:
-            messagebox.showwarning("선택 오류", "수정할 로그를 선택하세요.", parent=parent_win)
-            return
-        
-        try:
-            # 선택된 로그 정보 가져오기
-            item = log_tree.item(selection[0])
-            values = item['values']
-            
-            logs = self.load_work_logs()
-            selected_log = None
-            selected_index = None
-            
-            for i, log in enumerate(logs):
-                if (log['date'] == values[0] and 
-                    log.get('category', '미분류') == values[1] and
-                    log['timestamp'] == values[5]):
-                    selected_log = log
-                    selected_index = i
-                    break
-            
-            if not selected_log:
-                messagebox.showerror("오류", "해당 로그를 찾을 수 없습니다.", parent=parent_win)
-                return
-            
-            # 수정 창 생성
-            self._show_edit_window(selected_log, selected_index, parent_win, refresh_func)
-            
-        except Exception as e:
-            messagebox.showerror("오류", f"로그 수정 중 오류가 발생했습니다:\n{e}", parent=parent_win)
-    
-    def _show_edit_window(self, log_data, log_index, parent_win, refresh_func):
-        """로그 수정 창 표시"""
-        edit_win = tk.Toplevel(parent_win)
-        edit_win.title(f"작업 로그 수정 - {log_data['date']}")
-        edit_win.geometry("800x700")
-        edit_win.transient(parent_win)
-        edit_win.grab_set()  # 모달 창으로 설정
-        
-        # 메인 프레임
-        main_frame = ttk.Frame(edit_win)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # 제목
-        title_label = ttk.Label(main_frame, text="작업 로그 수정", font=('Arial', 14, 'bold'))
-        title_label.pack(pady=(0, 10))
-        
-        # 입력 프레임
-        input_frame = ttk.LabelFrame(main_frame, text="로그 정보 수정", padding=10)
-        input_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        # 날짜 입력 UI 생성
-        date_vars = self._create_date_input_for_edit(input_frame, log_data)
-        
-        # 카테고리 및 상태 선택 UI 생성
-        category_vars = self._create_category_input_for_edit(input_frame, log_data)
-        
-        # 시간 입력 UI 생성
-        time_vars = self._create_time_input_for_edit(input_frame, log_data)
-        
-        # 상태 변경 시 라벨 업데이트 함수
-        def on_status_change(*args):
-            status = category_vars['status'].get()
-            if status == "완료":
-                time_vars['end_label'].config(text="완료 시각:")
-            else:
-                time_vars['end_label'].config(text="예상 종료:")
-        
-        category_vars['status'].trace('w', on_status_change)
-        
-        # 작업 내용 입력 UI 생성
-        content_text = self._create_content_input_for_edit(input_frame, log_data)
-        
-        # 버튼 프레임
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X)
-        
-        # 수정 완료 함수
-        def save_changes():
-            self._save_log_changes(log_index, date_vars, category_vars, time_vars, content_text, edit_win, refresh_func)
-        
-        # 버튼들
-        cancel_btn = ttk.Button(button_frame, text="취소", command=edit_win.destroy)
-        cancel_btn.pack(side=tk.RIGHT)
-        
-        save_btn = ttk.Button(button_frame, text="수정 완료", command=save_changes)
-        save_btn.pack(side=tk.RIGHT, padx=(0, 5))
-        
-        # 창 포커스
-        edit_win.focus_set()
-        content_text.focus()
-    
-    def _create_date_input_for_edit(self, parent_frame, log_data):
-        """수정용 날짜 입력 UI 생성"""
-        date_frame = ttk.Frame(parent_frame)
-        date_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        ttk.Label(date_frame, text="날짜:", width=10).pack(side=tk.LEFT)
-        
-        # 기존 날짜 파싱
-        date_parts = log_data['date'].split('-')
-        
-        year_var = tk.StringVar(value=date_parts[0])
-        month_var = tk.StringVar(value=date_parts[1])
-        day_var = tk.StringVar(value=date_parts[2])
-        
-        year_spinbox = tk.Spinbox(date_frame, from_=2020, to=2030, width=6, textvariable=year_var)
-        year_spinbox.pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(date_frame, text="년").pack(side=tk.LEFT, padx=(0, 10))
-        
-        month_spinbox = tk.Spinbox(date_frame, from_=1, to=12, width=4, textvariable=month_var, format="%02.0f")
-        month_spinbox.pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(date_frame, text="월").pack(side=tk.LEFT, padx=(0, 10))
-        
-        day_spinbox = tk.Spinbox(date_frame, from_=1, to=31, width=4, textvariable=day_var, format="%02.0f")
-        day_spinbox.pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(date_frame, text="일").pack(side=tk.LEFT, padx=(0, 10))
-        
-        return {'year': year_var, 'month': month_var, 'day': day_var}
-    
-    def _create_category_input_for_edit(self, parent_frame, log_data):
-        """수정용 카테고리 및 상태 선택 UI 생성"""
-        category_frame = ttk.Frame(parent_frame)
-        category_frame.pack(fill=tk.X, pady=(5, 5))
-        # 작업 종류
-        ttk.Label(category_frame, text="작업 종류:", width=10).pack(side=tk.LEFT)
-        
-        category_var = tk.StringVar(value=log_data.get('category', ''))
-        categories = ["Li-Ag 충전", "IR Align", "EUV Align", "기타 장비 점검"]
-        category_combo = ttk.Combobox(category_frame, textvariable=category_var, values=categories, width=15)
-        category_combo.pack(side=tk.LEFT, padx=(0, 20))
-        
-        # 작업 상태
-        ttk.Label(category_frame, text="상태:", width=8).pack(side=tk.LEFT)
-        
-        status_var = tk.StringVar(value=log_data.get('status', '진행중'))
-        statuses = ["진행중", "완료"]
-        status_combo = ttk.Combobox(category_frame, textvariable=status_var, values=statuses, width=10)
-        status_combo.pack(side=tk.LEFT)
-        
-        return {'category': category_var, 'status': status_var}
-    
-    def _create_time_input_for_edit(self, parent_frame, log_data):
-        """수정용 시간 입력 UI 생성 (날짜 포함)"""
-        time_frame = ttk.LabelFrame(parent_frame, text="작업 시간", padding=5)
-        time_frame.pack(fill=tk.X, pady=(5, 5))
-        
-        # 기존 데이터에서 날짜/시간 파싱
-        start_datetime_str = log_data.get('start_datetime', '')
-        end_datetime_str = log_data.get('end_datetime', '')
-        
-        # 기존 데이터 호환성 처리
-        if not start_datetime_str and 'start_time' in log_data:
-            # 기존 형식: 날짜는 로그 날짜, 시간만 별도
-            start_datetime_str = f"{log_data['date']} {log_data['start_time']}"
-        if not end_datetime_str and 'end_time' in log_data:
-            end_datetime_str = f"{log_data['date']} {log_data['end_time']}"
-        
-        # 기본값 설정
-        try:
-            start_dt = datetime.datetime.strptime(start_datetime_str, "%Y-%m-%d %H:%M")
-        except:
-            start_dt = datetime.datetime.now()
-        
-        try:
-            end_dt = datetime.datetime.strptime(end_datetime_str, "%Y-%m-%d %H:%M")
-        except:
-            end_dt = start_dt + datetime.timedelta(hours=1)
-        
-        # 시작 시간
-        start_frame = ttk.Frame(time_frame)
-        start_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(start_frame, text="시작:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-        
-        start_datetime_frame = ttk.Frame(start_frame)
-        start_datetime_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        # 시작 날짜
-        ttk.Label(start_datetime_frame, text="날짜:", width=8).grid(row=0, column=0, sticky='w', padx=(0, 5))
-        
-        start_year_var = tk.StringVar(value=str(start_dt.year))
-        start_month_var = tk.StringVar(value=f"{start_dt.month:02d}")
-        start_day_var = tk.StringVar(value=f"{start_dt.day:02d}")
-        
-        start_year_spin = tk.Spinbox(start_datetime_frame, from_=2020, to=2030, width=6, textvariable=start_year_var)
-        start_year_spin.grid(row=0, column=1, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="년").grid(row=0, column=2, padx=(0, 8))
-        
-        start_month_spin = tk.Spinbox(start_datetime_frame, from_=1, to=12, width=4, textvariable=start_month_var, format="%02.0f")
-        start_month_spin.grid(row=0, column=3, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="월").grid(row=0, column=4, padx=(0, 8))
-        
-        start_day_spin = tk.Spinbox(start_datetime_frame, from_=1, to=31, width=4, textvariable=start_day_var, format="%02.0f")
-        start_day_spin.grid(row=0, column=5, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="일").grid(row=0, column=6, padx=(0, 15))
-        
-        # 시작 시간
-        ttk.Label(start_datetime_frame, text="시각:", width=8).grid(row=0, column=7, sticky='w', padx=(0, 5))
-        
-        start_hour_var = tk.StringVar(value=f"{start_dt.hour:02d}")
-        start_min_var = tk.StringVar(value=f"{start_dt.minute:02d}")
-        
-        start_hour_spin = tk.Spinbox(start_datetime_frame, from_=0, to=23, width=4, textvariable=start_hour_var, format="%02.0f")
-        start_hour_spin.grid(row=0, column=8, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="시").grid(row=0, column=9, padx=(0, 8))
-        
-        start_min_spin = tk.Spinbox(start_datetime_frame, from_=0, to=59, width=4, textvariable=start_min_var, format="%02.0f")
-        start_min_spin.grid(row=0, column=10, padx=(0, 2))
-        ttk.Label(start_datetime_frame, text="분").grid(row=0, column=11)
-        
-        # 종료 시간
-        end_frame = ttk.Frame(time_frame)
-        end_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        status = log_data.get('status', '진행중')
-        end_label_text = "완료:" if status == "완료" else "예상 종료:"
-        end_label = ttk.Label(end_frame, text=end_label_text, font=('Arial', 10, 'bold'))
-        end_label.pack(anchor=tk.W)
-        
-        end_datetime_frame = ttk.Frame(end_frame)
-        end_datetime_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        # 종료 날짜
-        ttk.Label(end_datetime_frame, text="날짜:", width=8).grid(row=0, column=0, sticky='w', padx=(0, 5))
-        
-        end_year_var = tk.StringVar(value=str(end_dt.year))
-        end_month_var = tk.StringVar(value=f"{end_dt.month:02d}")
-        end_day_var = tk.StringVar(value=f"{end_dt.day:02d}")
-        
-        end_year_spin = tk.Spinbox(end_datetime_frame, from_=2020, to=2030, width=6, textvariable=end_year_var)
-        end_year_spin.grid(row=0, column=1, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="년").grid(row=0, column=2, padx=(0, 8))
-        
-        end_month_spin = tk.Spinbox(end_datetime_frame, from_=1, to=12, width=4, textvariable=end_month_var, format="%02.0f")
-        end_month_spin.grid(row=0, column=3, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="월").grid(row=0, column=4, padx=(0, 8))
-        
-        end_day_spin = tk.Spinbox(end_datetime_frame, from_=1, to=31, width=4, textvariable=end_day_var, format="%02.0f")
-        end_day_spin.grid(row=0, column=5, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="일").grid(row=0, column=6, padx=(0, 15))
-        
-        # 종료 시간
-        ttk.Label(end_datetime_frame, text="시각:", width=8).grid(row=0, column=7, sticky='w', padx=(0, 5))
-        
-        end_hour_var = tk.StringVar(value=f"{end_dt.hour:02d}")
-        end_min_var = tk.StringVar(value=f"{end_dt.minute:02d}")
-        
-        end_hour_spin = tk.Spinbox(end_datetime_frame, from_=0, to=23, width=4, textvariable=end_hour_var, format="%02.0f")
-        end_hour_spin.grid(row=0, column=8, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="시").grid(row=0, column=9, padx=(0, 8))
-        
-        end_min_spin = tk.Spinbox(end_datetime_frame, from_=0, to=59, width=4, textvariable=end_min_var, format="%02.0f")
-        end_min_spin.grid(row=0, column=10, padx=(0, 2))
-        ttk.Label(end_datetime_frame, text="분").grid(row=0, column=11)
-        
-        # 편의 버튼들
-        convenience_frame = ttk.Frame(end_datetime_frame)
-        convenience_frame.grid(row=0, column=12, padx=(10, 0))
-        
-        def set_same_day():
-            """시작 날짜와 같은 날로 설정"""
-            end_year_var.set(start_year_var.get())
-            end_month_var.set(start_month_var.get())
-            end_day_var.set(start_day_var.get())
-        
-        def set_next_day():
-            """다음 날로 설정"""
+                pass
+
+        timestamp_value = log.get("timestamp")
+        if timestamp_value:
             try:
-                start_date = datetime.datetime(
-                    int(start_year_var.get()),
-                    int(start_month_var.get()),
-                    int(start_day_var.get())
-                )
-                next_date = start_date + datetime.timedelta(days=1)
-                end_year_var.set(str(next_date.year))
-                end_month_var.set(f"{next_date.month:02d}")
-                end_day_var.set(f"{next_date.day:02d}")
+                return datetime.datetime.strptime(timestamp_value, "%Y-%m-%d %H:%M:%S")
             except ValueError:
-                pass  # 잘못된 날짜인 경우 무시
-        
-        same_day_btn = ttk.Button(convenience_frame, text="당일", command=set_same_day, width=6)
-        same_day_btn.pack(side=tk.TOP, pady=(0, 2))
-        
-        next_day_btn = ttk.Button(convenience_frame, text="다음날", command=set_next_day, width=6)
-        next_day_btn.pack(side=tk.TOP)
-        
-        return {
-            'start_year': start_year_var, 'start_month': start_month_var, 'start_day': start_day_var,
-            'start_hour': start_hour_var, 'start_min': start_min_var,
-            'end_year': end_year_var, 'end_month': end_month_var, 'end_day': end_day_var,
-            'end_hour': end_hour_var, 'end_min': end_min_var,
-            'end_label': end_label
-        }
-    
-    def _save_log_changes(self, log_index, date_vars, category_vars, time_vars, content_text, edit_win, refresh_func):
-        """로그 변경사항 저장"""
+                pass
+
+        return datetime.datetime.min
+
+    @staticmethod
+    def _parse_datetime(value: str) -> Optional[datetime.datetime]:
+        """문자열을 datetime 객체로 변환한다."""
         try:
-            # 입력 검증
-            date_str = f"{date_vars['year'].get()}-{date_vars['month'].get()}-{date_vars['day'].get()}"
-            category = category_vars['category'].get().strip()
-            status = category_vars['status'].get().strip()
-            content = content_text.get("1.0", tk.END).strip()
-            
-            # 시작/종료 날짜+시간 정보
-            start_date = f"{time_vars['start_year'].get()}-{time_vars['start_month'].get()}-{time_vars['start_day'].get()}"
-            start_time = f"{time_vars['start_hour'].get()}:{time_vars['start_min'].get()}"
-            start_datetime = f"{start_date} {start_time}"
-            
-            end_date = f"{time_vars['end_year'].get()}-{time_vars['end_month'].get()}-{time_vars['end_day'].get()}"
-            end_time = f"{time_vars['end_hour'].get()}:{time_vars['end_min'].get()}"
-            end_datetime = f"{end_date} {end_time}"
-            
-            if not category:
-                messagebox.showwarning("입력 오류", "작업 종류 카테고리를 선택하세요.", parent=edit_win)
-                return
-            
-            if not status:
-                messagebox.showwarning("입력 오류", "작업 상태를 선택하세요.", parent=edit_win)
-                return
-            
-            if not content:
-                messagebox.showwarning("입력 오류", "작업 내용을 입력하세요.", parent=edit_win)
-                content_text.focus()
-                return
-            
-            # 날짜 유효성 검증
-            try:
-                datetime.datetime.strptime(date_str, "%Y-%m-%d")
-                start_dt = datetime.datetime.strptime(start_datetime, "%Y-%m-%d %H:%M")
-                end_dt = datetime.datetime.strptime(end_datetime, "%Y-%m-%d %H:%M")
-            except ValueError:
-                messagebox.showerror("날짜/시간 오류", "올바른 날짜와 시간을 입력하세요.", parent=edit_win)
-                return
-            
-            # 시작 시간이 종료 시간보다 늦은지 확인
-            if start_dt >= end_dt:
-                messagebox.showwarning("시간 오류", "종료 시간은 시작 시간보다 늦어야 합니다.", parent=edit_win)
-                return
-            
-            # 기존 로그 로드
-            logs = self.load_work_logs()
-            
-            if log_index >= len(logs):
-                messagebox.showerror("오류", "해당 로그를 찾을 수 없습니다.", parent=edit_win)
-                return
-            
-            # 로그 업데이트 (원래 timestamp는 유지)
-            original_timestamp = logs[log_index]['timestamp']
-            logs[log_index] = {
-                "date": date_str,
-                "category": category,
-                "status": status,
-                "start_datetime": start_datetime,  # 새 필드
-                "end_datetime": end_datetime,      # 새 필드
-                "start_time": start_time,          # 기존 호환성
-                "end_time": end_time,              # 기존 호환성
-                "content": content,
-                "timestamp": original_timestamp,
-                "modified": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # 수정 시간 추가
-            }
-            
-            # 날짜순으로 정렬 (최신이 위로)
-            logs.sort(key=lambda x: x["date"], reverse=True)
-            
-            # 저장
-            if self.save_work_logs(logs):
-                messagebox.showinfo("수정 완료", "작업 로그가 수정되었습니다.", parent=edit_win)
-                edit_win.destroy()
-                refresh_func()
-            else:
-                messagebox.showerror("수정 실패", "로그 수정에 실패했습니다.", parent=edit_win)
-                
-        except Exception as e:
-            messagebox.showerror("오류", f"로그 수정 중 오류가 발생했습니다:\n{e}", parent=edit_win)
-    
-    def _show_log_detail(self, event, log_tree, parent_win):
-        """로그 상세보기"""
-        selection = log_tree.selection()
-        if not selection:
-            return
-            
-        item = log_tree.item(selection[0])
-        values = item['values']
-        
-        # 해당 로그의 전체 내용 찾기
-        logs = self.load_work_logs()
-        selected_log = None
-        for log in logs:
-            if (log['date'] == values[0] and 
-                log.get('category', '미분류') == values[1] and
-                log['timestamp'] == values[5]):  # 새로운 컬럼 구조에 맞게 인덱스 변경
-                selected_log = log
-                break
-        
-        if not selected_log:
-            return
-            
-        # 상세보기 창
-        detail_win = tk.Toplevel(parent_win)
-        detail_win.title(f"작업 로그 상세보기 - {selected_log['date']}")
-        detail_win.geometry("700x600")
-        detail_win.transient(parent_win)
-        
-        detail_frame = ttk.Frame(detail_win)
-        detail_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # 기본 정보
-        info_frame = ttk.Frame(detail_frame)
-        info_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(info_frame, text="날짜:", font=('Arial', 10, 'bold')).grid(row=0, column=0, sticky='w', padx=(0, 10))
-        ttk.Label(info_frame, text=selected_log['date'], font=('Arial', 10)).grid(row=0, column=1, sticky='w')
-        
-        ttk.Label(info_frame, text="작업 종류:", font=('Arial', 10, 'bold')).grid(row=1, column=0, sticky='w', padx=(0, 10), pady=(5, 0))
-        ttk.Label(info_frame, text=selected_log.get('category', '미분류'), font=('Arial', 10)).grid(row=1, column=1, sticky='w', pady=(5, 0))
-        
-        ttk.Label(info_frame, text="상태:", font=('Arial', 10, 'bold')).grid(row=2, column=0, sticky='w', padx=(0, 10), pady=(5, 0))
-        status_text = selected_log.get('status', '미지정')
-        status_color = 'green' if status_text == '완료' else 'blue'
-        status_label = ttk.Label(info_frame, text=status_text, font=('Arial', 10, 'bold'), foreground=status_color)
-        status_label.grid(row=2, column=1, sticky='w', pady=(5, 0))
-        
-        # 작업 시간 정보
-        if 'start_time' in selected_log and 'end_time' in selected_log:
-            status = selected_log.get('status', '미지정')
-            time_label = "완료 시간:" if status == "완료" else "예상 시간:"
-            ttk.Label(info_frame, text="시작 시간:", font=('Arial', 10, 'bold')).grid(row=3, column=0, sticky='w', padx=(0, 10), pady=(5, 0))
-            ttk.Label(info_frame, text=selected_log['start_time'], font=('Arial', 10)).grid(row=3, column=1, sticky='w', pady=(5, 0))
-            
-            ttk.Label(info_frame, text=time_label, font=('Arial', 10, 'bold')).grid(row=4, column=0, sticky='w', padx=(0, 10), pady=(5, 0))
-            ttk.Label(info_frame, text=selected_log['end_time'], font=('Arial', 10)).grid(row=4, column=1, sticky='w', pady=(5, 0))
-        
-        ttk.Label(info_frame, text="등록시간:", font=('Arial', 10, 'bold')).grid(row=5, column=0, sticky='w', padx=(0, 10), pady=(5, 0))
-        ttk.Label(info_frame, text=selected_log['timestamp'], font=('Arial', 10)).grid(row=5, column=1, sticky='w', pady=(5, 0))
-        
-        # 수정 시간 정보 (있는 경우)
-        if 'modified' in selected_log:
-            ttk.Label(info_frame, text="수정시간:", font=('Arial', 10, 'bold')).grid(row=6, column=0, sticky='w', padx=(0, 10), pady=(5, 0))
-            ttk.Label(info_frame, text=selected_log['modified'], font=('Arial', 10), foreground='orange').grid(row=6, column=1, sticky='w', pady=(5, 0))
-        
-        # 작업 내용
-        ttk.Label(detail_frame, text="작업 내용:", font=('Arial', 10, 'bold')).pack(anchor='w', pady=(10, 5))
-        
-        content_detail_frame = ttk.Frame(detail_frame)
-        content_detail_frame.pack(fill=tk.BOTH, expand=True)
-        
-        content_detail_text = tk.Text(content_detail_frame, wrap=tk.WORD, font=('Arial', 10))
-        content_detail_scrollbar = ttk.Scrollbar(content_detail_frame, orient="vertical", command=content_detail_text.yview)
-        content_detail_text.configure(yscrollcommand=content_detail_scrollbar.set)
-        
-        content_detail_text.insert(tk.END, selected_log['content'])
-        content_detail_text.config(state=tk.DISABLED)
-        
-        content_detail_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        content_detail_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # 닫기 버튼
-        close_btn = ttk.Button(detail_frame, text="닫기", command=detail_win.destroy)
-        close_btn.pack(pady=(10, 0))
-    
-    def _export_logs(self, parent_win):
-        """로그를 파일로 내보내기"""
-        logs = self.load_work_logs()
-        if not logs:
-            messagebox.showwarning("경고", "내보낼 로그가 없습니다.", parent=parent_win)
-            return
-        
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx",
-            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("JSON files", "*.json")],
-            title="작업 로그 내보내기",
-            initialfile="work_log_export",
-            parent=parent_win
+            return datetime.datetime.strptime(value, "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
+
+    def show_work_log(self) -> None:
+        """PyQt 대화상자를 띄워 작업 로그를 관리한다."""
+        app = QtWidgets.QApplication.instance()
+        created = False
+        if app is None:
+            app = QtWidgets.QApplication(sys.argv or [""])  # type: ignore[arg-type]
+            created = True
+
+        parent: Optional[QtWidgets.QWidget] = self.parent_widget if isinstance(self.parent_widget, QtWidgets.QWidget) else None
+        dialog = WorkLogManagerDialog(manager=self, parent=parent)
+        dialog.exec_()
+
+        if created:
+            app.quit()
+
+
+class WorkLogManagerDialog(QtWidgets.QDialog):
+    """작업 로그 입력 및 목록 관리를 위한 대화상자."""
+
+    def __init__(self, manager: WorkLogManager, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        """대화상자를 초기화한다."""
+        super().__init__(parent)
+        self.manager = manager
+        self._display_logs: List[Dict[str, Any]] = []
+
+        self.setWindowTitle("작업 로그 관리")
+        self.resize(1100, 780)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        self._build_ui()
+        self._connect_signals()
+        self._set_default_times()
+        self.refresh_table()
+
+    def _build_ui(self) -> None:
+        """UI 위젯을 생성하고 배치한다."""
+        self.main_layout = QtWidgets.QVBoxLayout(self)
+        self._build_input_group()
+        self._build_table_group()
+
+    def _build_input_group(self) -> None:
+        """입력 영역 UI를 구성한다."""
+        group = QtWidgets.QGroupBox("새 작업 로그 입력", self)
+        layout = QtWidgets.QGridLayout(group)
+
+        today = QtCore.QDate.currentDate()
+        now = QtCore.QDateTime.currentDateTime()
+
+        date_label = QtWidgets.QLabel("날짜:", group)
+        self.date_edit = QtWidgets.QDateEdit(today, group)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.setCalendarPopup(True)
+
+        category_label = QtWidgets.QLabel("작업 종류:", group)
+        self.category_combo = QtWidgets.QComboBox(group)
+        self.category_combo.addItems(CATEGORY_OPTIONS)
+
+        status_label = QtWidgets.QLabel("상태:", group)
+        self.status_combo = QtWidgets.QComboBox(group)
+        self.status_combo.addItems(STATUS_OPTIONS)
+
+        start_label = QtWidgets.QLabel("시작 시각:", group)
+        self.start_edit = QtWidgets.QDateTimeEdit(now, group)
+        self.start_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.start_edit.setCalendarPopup(True)
+
+        self.end_label = QtWidgets.QLabel("예상 종료:", group)
+        self.end_edit = QtWidgets.QDateTimeEdit(now.addSecs(3600), group)
+        self.end_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.end_edit.setCalendarPopup(True)
+
+        content_label = QtWidgets.QLabel("작업 내용:", group)
+        self.content_edit = QtWidgets.QPlainTextEdit(group)
+        self.content_edit.setPlaceholderText("작업 내용을 입력하세요.")
+        self.content_edit.setMinimumHeight(100)
+
+        self.add_button = QtWidgets.QPushButton("로그 추가", group)
+        self.clear_button = QtWidgets.QPushButton("입력 초기화", group)
+
+        layout.addWidget(date_label, 0, 0)
+        layout.addWidget(self.date_edit, 0, 1)
+        layout.addWidget(category_label, 0, 2)
+        layout.addWidget(self.category_combo, 0, 3)
+        layout.addWidget(status_label, 0, 4)
+        layout.addWidget(self.status_combo, 0, 5)
+
+        layout.addWidget(start_label, 1, 0)
+        layout.addWidget(self.start_edit, 1, 1, 1, 2)
+        layout.addWidget(self.end_label, 1, 3)
+        layout.addWidget(self.end_edit, 1, 4, 1, 2)
+
+        layout.addWidget(content_label, 2, 0, 1, 6)
+        layout.addWidget(self.content_edit, 3, 0, 1, 6)
+
+        layout.addWidget(self.clear_button, 4, 4)
+        layout.addWidget(self.add_button, 4, 5)
+
+        self.main_layout.addWidget(group)
+
+    def _build_table_group(self) -> None:
+        """로그 목록 영역 UI를 구성한다."""
+        group = QtWidgets.QGroupBox("작업 로그 이력", self)
+        layout = QtWidgets.QVBoxLayout(group)
+
+        filter_layout = QtWidgets.QHBoxLayout()
+        filter_label = QtWidgets.QLabel("카테고리 필터:", group)
+        self.filter_combo = QtWidgets.QComboBox(group)
+        self.filter_combo.addItem("전체")
+        self.filter_combo.addItems(CATEGORY_OPTIONS)
+        self.filter_combo.setCurrentIndex(0)
+        filter_layout.addWidget(filter_label)
+        filter_layout.addWidget(self.filter_combo)
+        filter_layout.addStretch()
+
+        self.table = QtWidgets.QTableWidget(0, 6, group)
+        self.table.setHorizontalHeaderLabels(
+            ["날짜", "작업 종류", "상태", "작업 시간", "내용", "등록 시간"],
         )
-        
-        if file_path:
-            try:
-                if file_path.endswith('.json'):
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        json.dump(logs, f, ensure_ascii=False, indent=2)
+        header = self.table.horizontalHeader()
+        if header is not None:
+            header.setStretchLastSection(True)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.table.setWordWrap(True)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        self.refresh_button = QtWidgets.QPushButton("새로고침", group)
+        self.edit_button = QtWidgets.QPushButton("선택 로그 수정", group)
+        self.delete_button = QtWidgets.QPushButton("선택 로그 삭제", group)
+        self.export_button = QtWidgets.QPushButton("로그 내보내기", group)
+        self.calendar_button = QtWidgets.QPushButton("달력으로 보기", group)
+
+        button_layout.addWidget(self.refresh_button)
+        button_layout.addWidget(self.delete_button)
+        button_layout.addWidget(self.edit_button)
+        button_layout.addWidget(self.export_button)
+        button_layout.addWidget(self.calendar_button)
+        button_layout.addStretch()
+
+        self.stats_label = QtWidgets.QLabel("표시할 로그가 없습니다.", group)
+        self.stats_label.setStyleSheet("color: #555555;")
+
+        layout.addLayout(filter_layout)
+        layout.addWidget(self.table)
+        layout.addWidget(self.stats_label)
+        layout.addLayout(button_layout)
+
+        self.main_layout.addWidget(group, stretch=1)
+
+    def _connect_signals(self) -> None:
+        """위젯 시그널을 슬롯에 연결한다."""
+        self.status_combo.currentTextChanged.connect(self._on_status_changed)
+        self.add_button.clicked.connect(self._on_add_clicked)
+        self.clear_button.clicked.connect(self._on_clear_clicked)
+        self.refresh_button.clicked.connect(self.refresh_table)
+        self.delete_button.clicked.connect(self._on_delete_clicked)
+        self.edit_button.clicked.connect(self._on_edit_clicked)
+        self.export_button.clicked.connect(self._on_export_clicked)
+        self.calendar_button.clicked.connect(self._on_calendar_clicked)
+        self.filter_combo.currentTextChanged.connect(self.refresh_table)
+        self.table.doubleClicked.connect(self._on_detail_requested)
+
+    def _set_default_times(self) -> None:
+        """시작/종료 시각의 기본값을 설정한다."""
+        now = QtCore.QDateTime.currentDateTime()
+        self.start_edit.setDateTime(now)
+        self.end_edit.setDateTime(now.addSecs(3600))
+
+    def _on_status_changed(self, status_text: str) -> None:
+        """상태에 따라 종료 라벨을 갱신한다."""
+        if status_text == "완료":
+            self.end_label.setText("완료 시각:")
+        else:
+            self.end_label.setText("예상 종료:")
+
+    def _on_clear_clicked(self) -> None:
+        """입력 필드를 초기화한다."""
+        self.date_edit.setDate(QtCore.QDate.currentDate())
+        self.category_combo.setCurrentIndex(0)
+        self.status_combo.setCurrentIndex(0)
+        self._set_default_times()
+        self.content_edit.clear()
+        self.content_edit.setFocus()
+
+    def refresh_table(self) -> None:
+        """로그 테이블 데이터를 새로고침한다."""
+        logs = self.manager.sort_logs(self.manager.load_work_logs())
+        filter_value = self._current_filter()
+
+        filtered: List[Dict[str, Any]] = []
+        for log in logs:
+            if filter_value != "전체" and log.get("category", "미분류") != filter_value:
+                continue
+            filtered.append(log)
+
+        self._display_logs = filtered
+        self.table.setRowCount(len(filtered))
+
+        for row, log in enumerate(filtered):
+            self._populate_row(row, log)
+
+        self.table.resizeColumnsToContents()
+        self._update_stats(filtered, len(logs))
+
+    def _populate_row(self, row: int, log: Dict[str, Any]) -> None:
+        """테이블의 한 행을 채운다."""
+        items = [
+            log.get("date", ""),
+            log.get("category", "미분류"),
+            log.get("status", "미지정"),
+            self._format_time_range(log),
+            self._content_preview(log.get("content", "")),
+            log.get("timestamp", ""),
+        ]
+
+        for column, value in enumerate(items):
+            item = QtWidgets.QTableWidgetItem(value)
+            if column == 2:
+                color = QtGui.QColor("#1e88e5")
+                if value == "완료":
+                    color = QtGui.QColor("#2e7d32")
+                item.setForeground(QtGui.QBrush(color))
+            if column == 4:
+                item.setToolTip(log.get("content", ""))
+            item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, column, item)
+
+    def _collect_form_data(self) -> Optional[Dict[str, Any]]:
+        """입력 폼 값을 읽어 검증한 뒤 로그 딕셔너리를 생성한다."""
+        date_value = self.date_edit.date().toPyDate()
+        category = self.category_combo.currentText().strip()
+        status = self.status_combo.currentText().strip()
+        start_dt = self.start_edit.dateTime().toPyDateTime()
+        end_dt = self.end_edit.dateTime().toPyDateTime()
+        content = self.content_edit.toPlainText().strip()
+
+        if not category:
+            QtWidgets.QMessageBox.warning(self, "입력 오류", "장비 카테고리를 선택하세요.")
+            return None
+        if not status:
+            QtWidgets.QMessageBox.warning(self, "입력 오류", "작업 상태를 선택하세요.")
+            return None
+        if not content:
+            QtWidgets.QMessageBox.warning(self, "입력 오류", "작업 내용을 입력하세요.")
+            self.content_edit.setFocus()
+            return None
+        if start_dt >= end_dt:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "시간 오류",
+                "종료 시간은 시작 시간보다 늦어야 합니다.",
+            )
+            return None
+
+        new_log: Dict[str, Any] = {
+            "date": date_value.strftime("%Y-%m-%d"),
+            "category": category,
+            "status": status,
+            "start_datetime": start_dt.strftime("%Y-%m-%d %H:%M"),
+            "end_datetime": end_dt.strftime("%Y-%m-%d %H:%M"),
+            "start_time": start_dt.strftime("%H:%M"),
+            "end_time": end_dt.strftime("%H:%M"),
+            "content": content,
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        return new_log
+
+    def _on_add_clicked(self) -> None:
+        """새 로그를 추가한다."""
+        form_data = self._collect_form_data()
+        if form_data is None:
+            return
+
+        logs = self.manager.load_work_logs()
+        logs.append(form_data)
+        logs = self.manager.sort_logs(logs)
+
+        if self.manager.save_work_logs(logs):
+            QtWidgets.QMessageBox.information(self, "저장 완료", "작업 로그가 저장되었습니다.")
+            self._on_clear_clicked()
+            self.refresh_table()
+        else:
+            QtWidgets.QMessageBox.critical(self, "저장 실패", "로그 저장에 실패했습니다.")
+
+    def _on_edit_clicked(self) -> None:
+        """선택한 로그를 수정한다."""
+        log = self._current_selection()
+        if log is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "선택 필요",
+                "수정할 로그를 먼저 선택하세요.",
+            )
+            return
+
+        dialog = LogEditorDialog(log, parent=self)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        updated_log = dialog.result_log
+        if updated_log is None:
+            return
+
+        logs = self.manager.load_work_logs()
+        target_timestamp = updated_log["timestamp"]
+        for index, item in enumerate(logs):
+            if item.get("timestamp") == target_timestamp:
+                logs[index] = updated_log
+                break
+        else:
+            QtWidgets.QMessageBox.warning(self, "수정 실패", "해당 로그를 찾을 수 없습니다.")
+            return
+
+        logs = self.manager.sort_logs(logs)
+        if self.manager.save_work_logs(logs):
+            QtWidgets.QMessageBox.information(self, "수정 완료", "작업 로그가 수정되었습니다.")
+            self.refresh_table()
+        else:
+            QtWidgets.QMessageBox.critical(self, "수정 실패", "로그 수정 중 오류가 발생했습니다.")
+
+    def _on_delete_clicked(self) -> None:
+        """선택한 로그를 삭제한다."""
+        log = self._current_selection()
+        if log is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "선택 필요",
+                "삭제할 로그를 먼저 선택하세요.",
+            )
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "삭제 확인",
+            "선택한 로그를 삭제하시겠습니까?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        logs = self.manager.load_work_logs()
+        target_timestamp = log.get("timestamp")
+        logs = [
+            item
+            for item in logs
+            if item.get("timestamp") != target_timestamp
+        ]
+
+        if self.manager.save_work_logs(self.manager.sort_logs(logs)):
+            QtWidgets.QMessageBox.information(self, "삭제 완료", "선택한 로그가 삭제되었습니다.")
+            self.refresh_table()
+        else:
+            QtWidgets.QMessageBox.critical(self, "삭제 실패", "로그 삭제 중 오류가 발생했습니다.")
+
+    def _on_export_clicked(self) -> None:
+        """로그 데이터를 파일로 내보낸다."""
+        logs = self.manager.load_work_logs()
+        if not logs:
+            QtWidgets.QMessageBox.warning(self, "내보내기", "내보낼 로그가 없습니다.")
+            return
+
+        file_path, file_type = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "작업 로그 내보내기",
+            "work_log_export.xlsx",
+            "Excel Files (*.xlsx);;CSV Files (*.csv);;JSON Files (*.json)",
+        )
+        if not file_path:
+            return
+
+        try:
+            if file_path.lower().endswith(".json"):
+                with Path(file_path).open("w", encoding="utf-8") as file:
+                    json.dump(logs, file, ensure_ascii=False, indent=2)
+            else:
+                df = pd.DataFrame(logs)
+                if file_path.lower().endswith(".csv"):
+                    df.to_csv(file_path, index=False, encoding="utf-8-sig")
                 else:
-                    df_export = pd.DataFrame(logs)
-                    if file_path.endswith('.xlsx'):
-                        df_export.to_excel(file_path, index=False)
-                    else:
-                        df_export.to_csv(file_path, index=False, encoding='utf-8-sig')
-                
-                messagebox.showinfo("내보내기 완료", f"로그가 내보내졌습니다:\n{file_path}", parent=parent_win)
-                
-            except Exception as e:
-                messagebox.showerror("내보내기 실패", f"파일 내보내기에 실패했습니다:\n{e}", parent=parent_win)
+                    df.to_excel(file_path, index=False)
+            QtWidgets.QMessageBox.information(
+                self,
+                "내보내기 완료",
+                f"로그가 내보내졌습니다:\n{file_path}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(
+                self,
+                "내보내기 실패",
+                f"파일 내보내기에 실패했습니다:\n{exc}",
+            )
+
+    def _on_calendar_clicked(self) -> None:
+        """달력 뷰를 연다."""
+        logs = self.manager.load_work_logs()
+        if not logs:
+            QtWidgets.QMessageBox.information(self, "정보", "등록된 작업 로그가 없습니다.")
+            return
+        open_work_log_calendar(self, logs)
+
+    def _on_detail_requested(self, index: QtCore.QModelIndex) -> None:
+        """선택된 로그의 상세 정보를 표시한다."""
+        log = self._current_selection()
+        if log is None:
+            return
+        dialog = LogDetailDialog(log, parent=self)
+        dialog.exec_()
+
+    def _current_filter(self) -> str:
+        """현재 선택된 필터 값을 반환한다."""
+        return self.filter_combo.currentText().strip()
+
+    def _current_selection(self) -> Optional[Dict[str, Any]]:
+        """현재 테이블에서 선택된 로그를 반환한다."""
+        selected = self.table.currentRow()
+        if selected < 0 or selected >= len(self._display_logs):
+            return None
+        return self._display_logs[selected]
+
+    def _format_time_range(self, log: Dict[str, Any]) -> str:
+        """로그에 포함된 시간 범위를 문자열로 만든다."""
+        start_value = log.get("start_datetime")
+        end_value = log.get("end_datetime")
+        if start_value and end_value:
+            start_dt = WorkLogManager._parse_datetime(start_value)
+            end_dt = WorkLogManager._parse_datetime(end_value)
+            if start_dt and end_dt:
+                if start_dt.date() == end_dt.date():
+                    return f"{start_dt.strftime('%H:%M')} ~ {end_dt.strftime('%H:%M')}"
+                return (
+                    f"{start_dt.strftime('%m/%d %H:%M')} ~ "
+                    f"{end_dt.strftime('%m/%d %H:%M')}"
+                )
+
+        start_time = log.get("start_time")
+        end_time = log.get("end_time")
+        if start_time and end_time:
+            return f"{start_time} ~ {end_time}"
+
+        return "시간 정보 없음"
+
+    def _content_preview(self, content: str, limit: int = 80) -> str:
+        """내용의 미리보기를 생성한다."""
+        clean = content.replace("\n", " ").strip()
+        if len(clean) <= limit:
+            return clean
+        return f"{clean[:limit]}..."
+
+    def _update_stats(self, filtered: List[Dict[str, Any]], total_count: int) -> None:
+        """상태 표시 라벨을 갱신한다."""
+        unique_days = len({log.get("date") for log in filtered})
+        message = (
+            f"총 {total_count}건 중 {len(filtered)}건 표시 | "
+            f"고유 날짜 {unique_days}일"
+        )
+        self.stats_label.setText(message)
 
 
-# 편의 함수들
-def create_work_log_manager(parent_root=None):
-    """WorkLogManager 인스턴스 생성 편의 함수"""
-    return WorkLogManager(parent_root)
+class LogEditorDialog(QtWidgets.QDialog):
+    """기존 로그 수정을 위한 대화상자."""
+
+    def __init__(self, log: Dict[str, Any], parent: Optional[QtWidgets.QWidget] = None) -> None:
+        """수정 대화상자를 초기화한다."""
+        super().__init__(parent)
+        self.original_log = log
+        self.result_log: Optional[Dict[str, Any]] = None
+
+        self.setWindowTitle("작업 로그 수정")
+        self.resize(600, 400)
+
+        self._build_ui()
+        self._populate_fields()
+
+    def _build_ui(self) -> None:
+        """UI 위젯을 구성한다."""
+        layout = QtWidgets.QVBoxLayout(self)
+
+        form_layout = QtWidgets.QFormLayout()
+
+        self.date_edit = QtWidgets.QDateEdit(QtCore.QDate.currentDate(), self)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.setCalendarPopup(True)
+
+        self.category_combo = QtWidgets.QComboBox(self)
+        self.category_combo.addItems(CATEGORY_OPTIONS)
+
+        self.status_combo = QtWidgets.QComboBox(self)
+        self.status_combo.addItems(STATUS_OPTIONS)
+
+        self.start_edit = QtWidgets.QDateTimeEdit(QtCore.QDateTime.currentDateTime(), self)
+        self.start_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.start_edit.setCalendarPopup(True)
+
+        self.end_edit = QtWidgets.QDateTimeEdit(QtCore.QDateTime.currentDateTime(), self)
+        self.end_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.end_edit.setCalendarPopup(True)
+
+        self.content_edit = QtWidgets.QPlainTextEdit(self)
+        self.content_edit.setMinimumHeight(120)
+
+        form_layout.addRow("날짜:", self.date_edit)
+        form_layout.addRow("작업 종류:", self.category_combo)
+        form_layout.addRow("상태:", self.status_combo)
+        form_layout.addRow("시작 시각:", self.start_edit)
+        form_layout.addRow("종료 시각:", self.end_edit)
+        form_layout.addRow("작업 내용:", self.content_edit)
+
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel,
+            Qt.Orientation.Horizontal,
+            self,
+        )
+        button_box.accepted.connect(self._handle_accept)
+        button_box.rejected.connect(self.reject)
+
+        layout.addLayout(form_layout)
+        layout.addWidget(button_box)
+
+    def _populate_fields(self) -> None:
+        """기존 로그 값을 입력 위젯에 채운다."""
+        date_str = self.original_log.get("date", "")
+        if date_str:
+            try:
+                date = QtCore.QDate.fromString(date_str, "yyyy-MM-dd")
+                if date.isValid():
+                    self.date_edit.setDate(date)
+            except ValueError:
+                pass
+
+        start_str = self.original_log.get("start_datetime")
+        if start_str:
+            start = QtCore.QDateTime.fromString(start_str, "yyyy-MM-dd HH:mm")
+            if start.isValid():
+                self.start_edit.setDateTime(start)
+
+        end_str = self.original_log.get("end_datetime")
+        if end_str:
+            end = QtCore.QDateTime.fromString(end_str, "yyyy-MM-dd HH:mm")
+            if end.isValid():
+                self.end_edit.setDateTime(end)
+
+        category = self.original_log.get("category", CATEGORY_OPTIONS[0])
+        status = self.original_log.get("status", STATUS_OPTIONS[0])
+        self.category_combo.setCurrentText(category)
+        self.status_combo.setCurrentText(status)
+        self.content_edit.setPlainText(self.original_log.get("content", ""))
+
+    def _handle_accept(self) -> None:
+        """저장 버튼 클릭 시 입력값을 검증하고 결과를 저장한다."""
+        start_dt = self.start_edit.dateTime().toPyDateTime()
+        end_dt = self.end_edit.dateTime().toPyDateTime()
+        if start_dt >= end_dt:
+            QtWidgets.QMessageBox.warning(self, "시간 오류", "종료 시간은 시작보다 늦어야 합니다.")
+            return
+
+        content = self.content_edit.toPlainText().strip()
+        if not content:
+            QtWidgets.QMessageBox.warning(self, "입력 오류", "작업 내용을 입력하세요.")
+            return
+
+        new_log: Dict[str, Any] = {
+            "date": self.date_edit.date().toString("yyyy-MM-dd"),
+            "category": self.category_combo.currentText().strip(),
+            "status": self.status_combo.currentText().strip(),
+            "start_datetime": start_dt.strftime("%Y-%m-%d %H:%M"),
+            "end_datetime": end_dt.strftime("%Y-%m-%d %H:%M"),
+            "start_time": start_dt.strftime("%H:%M"),
+            "end_time": end_dt.strftime("%H:%M"),
+            "content": content,
+            "timestamp": self.original_log.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "modified": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        self.result_log = new_log
+        self.accept()
 
 
-def show_work_log_window(parent_root=None):
-    """작업 로그 창을 바로 표시하는 편의 함수"""
-    manager = WorkLogManager(parent_root)
+class LogDetailDialog(QtWidgets.QDialog):
+    """로그 상세 내용을 표시하는 대화상자."""
+
+    def __init__(self, log: Dict[str, Any], parent: Optional[QtWidgets.QWidget] = None) -> None:
+        """상세보기 대화상자를 초기화한다."""
+        super().__init__(parent)
+        self.log = log
+
+        self.setWindowTitle(f"작업 로그 상세보기 - {log.get('date', '')}")
+        self.resize(600, 500)
+
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        """상세보기 UI를 구성한다."""
+        layout = QtWidgets.QVBoxLayout(self)
+
+        form_layout = QtWidgets.QFormLayout()
+
+        form_layout.addRow("날짜:", QtWidgets.QLabel(self.log.get("date", "미지정"), self))
+        form_layout.addRow("작업 종류:", QtWidgets.QLabel(self.log.get("category", "미분류"), self))
+
+        status_label = QtWidgets.QLabel(self.log.get("status", "미지정"), self)
+        if self.log.get("status") == "완료":
+            status_label.setStyleSheet("color: #2e7d32; font-weight: bold;")
+        else:
+            status_label.setStyleSheet("color: #1e88e5; font-weight: bold;")
+        form_layout.addRow("상태:", status_label)
+
+        form_layout.addRow("작업 시간:", QtWidgets.QLabel(self._time_range_text(), self))
+
+        form_layout.addRow("등록 시간:", QtWidgets.QLabel(self.log.get("timestamp", ""), self))
+        if "modified" in self.log:
+            modified_label = QtWidgets.QLabel(self.log["modified"], self)
+            modified_label.setStyleSheet("color: #ef6c00;")
+            form_layout.addRow("수정 시간:", modified_label)
+
+        layout.addLayout(form_layout)
+
+        layout.addWidget(QtWidgets.QLabel("작업 내용:", self))
+        content_edit = QtWidgets.QPlainTextEdit(self)
+        content_edit.setPlainText(self.log.get("content", ""))
+        content_edit.setReadOnly(True)
+        layout.addWidget(content_edit)
+
+        close_button = QtWidgets.QPushButton("닫기", self)
+        close_button.clicked.connect(self.accept)
+        layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignRight)
+
+    def _time_range_text(self) -> str:
+        """로그의 시간 범위를 문자열로 변환한다."""
+        start_value = self.log.get("start_datetime")
+        end_value = self.log.get("end_datetime")
+        if start_value and end_value:
+            start_dt = WorkLogManager._parse_datetime(start_value)
+            end_dt = WorkLogManager._parse_datetime(end_value)
+            if start_dt and end_dt:
+                if start_dt.date() == end_dt.date():
+                    return f"{start_dt.strftime('%H:%M')} ~ {end_dt.strftime('%H:%M')}"
+                return (
+                    f"{start_dt.strftime('%m/%d %H:%M')} ~ "
+                    f"{end_dt.strftime('%m/%d %H:%M')}"
+                )
+
+        start_time = self.log.get("start_time")
+        end_time = self.log.get("end_time")
+        if start_time and end_time:
+            return f"{start_time} ~ {end_time}"
+
+        return "시간 정보 없음"
+
+
+def create_work_log_manager(parent_widget: Optional[Any] = None) -> WorkLogManager:
+    """WorkLogManager 인스턴스를 생성한다."""
+    return WorkLogManager(parent_widget)
+
+
+def show_work_log_window(parent_widget: Optional[Any] = None) -> WorkLogManager:
+    """작업 로그 창을 즉시 띄우고 WorkLogManager를 반환한다."""
+    manager = WorkLogManager(parent_widget)
     manager.show_work_log()
     return manager
 
 
-# 메인 실행 (테스트용)
 if __name__ == "__main__":
-    root = tk.Tk()
-    root.withdraw()  # 메인 창 숨기기
-    show_work_log_window(root)
-    root.mainloop()
+    work_log_manager = WorkLogManager()
+    work_log_manager.show_work_log()
