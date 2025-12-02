@@ -119,7 +119,7 @@ def create_onselect_function_with_context(root, custom_params, df_all, yvar, ax,
                     messagebox.showinfo("선택 구간 정보", msg + "\n\n레이저 파워 데이터가 없어 샷수 계산을 할 수 없습니다.")
                     return
                 
-                if 'euvChamber_euvPower_value' not in df_sel.columns거나 df_sel['euvChamber_euvPower_value'].isna().all():
+                if 'euvChamber_euvPower_value' not in df_sel.columns or df_sel['euvChamber_euvPower_value'].isna().all():
                     messagebox.showinfo("선택 구간 정보", msg + "\n\nEUV 파워 데이터가 없어 샷수 계산을 할 수 없습니다.")
                     return
                 
@@ -436,3 +436,4 @@ def create_onselect_function_with_context(root, custom_params, df_all, yvar, ax,
             messagebox.showerror("오류", f"구간 분석 중 오류가 발생했습니다:\n{str(e)}")
     
     return onselect_with_context
+

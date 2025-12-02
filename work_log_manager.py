@@ -22,6 +22,7 @@ CATEGORY_OPTIONS: List[str] = [
     "IR Align",
     "EUV Align",
     "CNT 장착",
+    "Overhaul",
     "기타 장비 점검",
 ]
 
@@ -37,7 +38,8 @@ class WorkLogManager:
             self.parent_widget = None
         else:
             self.parent_widget = parent_widget
-        self.log_file_path = Path(__file__).resolve().parent / "work_log.json"
+        # 네트워크 경로로 work_log.json 파일 경로 설정
+        self.log_file_path = Path(r"\\192.168.80.81\부설연구소\연구1팀\1 Li LPP\LEUS\Logs\work_log.json")
 
         print(f"작업 로그 파일: {self.log_file_path}")
         if self.log_file_path.exists():
@@ -45,7 +47,12 @@ class WorkLogManager:
             print(f"기존 로그 {len(logs)}개 로드됨")
         else:
             print("새 작업 로그 파일이 생성됩니다.")
-
+            # 디렉토리가 없으면 생성 시도
+            try:
+                self.log_file_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception as exc:
+                print(f"디렉토리 생성 실패: {exc}")
+    
     def load_work_logs(self) -> List[Dict[str, Any]]:
         """JSON 파일에서 작업 로그를 읽어 리스트로 반환한다."""
         if not self.log_file_path.exists():
@@ -56,7 +63,7 @@ class WorkLogManager:
         except Exception as exc:  # noqa: BLE001
             print(f"로그 파일 읽기 오류: {exc}")
         return []
-
+    
     def save_work_logs(self, logs: List[Dict[str, Any]]) -> bool:
         """작업 로그 리스트를 JSON 파일로 저장한다."""
         try:
@@ -66,7 +73,7 @@ class WorkLogManager:
         except Exception as exc:  # noqa: BLE001
             print(f"로그 파일 저장 오류: {exc}")
             return False
-
+    
     def sort_logs(self, logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """작업 로그 리스트를 시작 시각 기준으로 정렬한다."""
         return sorted(logs, key=self._log_sort_key, reverse=True)
@@ -413,11 +420,14 @@ class WorkLogManagerDialog(QtWidgets.QDialog):
 
         logs = self.manager.load_work_logs()
         target_timestamp = updated_log["timestamp"]
+        found = False
         for index, item in enumerate(logs):
             if item.get("timestamp") == target_timestamp:
                 logs[index] = updated_log
+                found = True
                 break
-        else:
+        
+        if not found:
             QtWidgets.QMessageBox.warning(self, "수정 실패", "해당 로그를 찾을 수 없습니다.")
             return
 
@@ -468,7 +478,7 @@ class WorkLogManagerDialog(QtWidgets.QDialog):
         if not logs:
             QtWidgets.QMessageBox.warning(self, "내보내기", "내보낼 로그가 없습니다.")
             return
-
+        
         file_path, file_type = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "작업 로그 내보내기",
@@ -477,7 +487,7 @@ class WorkLogManagerDialog(QtWidgets.QDialog):
         )
         if not file_path:
             return
-
+        
         try:
             if file_path.lower().endswith(".json"):
                 with Path(file_path).open("w", encoding="utf-8") as file:
@@ -503,16 +513,13 @@ class WorkLogManagerDialog(QtWidgets.QDialog):
     def _on_calendar_clicked(self) -> None:
         """달력 뷰를 연다."""
         logs = self.manager.load_work_logs()
-        if not logs:
-            QtWidgets.QMessageBox.information(self, "정보", "등록된 작업 로그가 없습니다.")
-            return
-        open_work_log_calendar(self, logs)
+        open_work_log_calendar(self, logs, manager=self.manager)
 
     def _on_detail_requested(self, index: QtCore.QModelIndex) -> None:
         """선택된 로그의 상세 정보를 표시한다."""
         log = self._current_selection()
         if log is None:
-            return
+                return
         dialog = LogDetailDialog(log, parent=self)
         dialog.exec_()
 
@@ -574,8 +581,11 @@ class LogEditorDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.original_log = log
         self.result_log: Optional[Dict[str, Any]] = None
+        # 새 로그 추가 모드인지 확인 (timestamp가 없거나 빈 문자열)
+        self.is_new_log = not log.get("timestamp")
 
-        self.setWindowTitle("작업 로그 수정")
+        title = "작업 로그 추가" if self.is_new_log else "작업 로그 수정"
+        self.setWindowTitle(title)
         self.resize(600, 400)
 
         self._build_ui()
@@ -636,12 +646,20 @@ class LogEditorDialog(QtWidgets.QDialog):
                     self.date_edit.setDate(date)
             except ValueError:
                 pass
+        else:
+            # 새 로그인 경우 오늘 날짜로 설정
+            self.date_edit.setDate(QtCore.QDate.currentDate())
 
         start_str = self.original_log.get("start_datetime")
         if start_str:
             start = QtCore.QDateTime.fromString(start_str, "yyyy-MM-dd HH:mm")
             if start.isValid():
                 self.start_edit.setDateTime(start)
+        else:
+            # 새 로그인 경우 현재 시간으로 설정
+            now = QtCore.QDateTime.currentDateTime()
+            self.start_edit.setDateTime(now)
+            self.end_edit.setDateTime(now.addSecs(3600))
 
         end_str = self.original_log.get("end_datetime")
         if end_str:
@@ -649,10 +667,12 @@ class LogEditorDialog(QtWidgets.QDialog):
             if end.isValid():
                 self.end_edit.setDateTime(end)
 
-        category = self.original_log.get("category", CATEGORY_OPTIONS[0])
-        status = self.original_log.get("status", STATUS_OPTIONS[0])
-        self.category_combo.setCurrentText(category)
-        self.status_combo.setCurrentText(status)
+        category = self.original_log.get("category", CATEGORY_OPTIONS[0] if CATEGORY_OPTIONS else "")
+        status = self.original_log.get("status", STATUS_OPTIONS[0] if STATUS_OPTIONS else "")
+        if category:
+            self.category_combo.setCurrentText(category)
+        if status:
+            self.status_combo.setCurrentText(status)
         self.content_edit.setPlainText(self.original_log.get("content", ""))
 
     def _handle_accept(self) -> None:
@@ -662,12 +682,13 @@ class LogEditorDialog(QtWidgets.QDialog):
         if start_dt >= end_dt:
             QtWidgets.QMessageBox.warning(self, "시간 오류", "종료 시간은 시작보다 늦어야 합니다.")
             return
-
+            
         content = self.content_edit.toPlainText().strip()
         if not content:
             QtWidgets.QMessageBox.warning(self, "입력 오류", "작업 내용을 입력하세요.")
+            self.content_edit.setFocus()
             return
-
+            
         new_log: Dict[str, Any] = {
             "date": self.date_edit.date().toString("yyyy-MM-dd"),
             "category": self.category_combo.currentText().strip(),
@@ -677,8 +698,8 @@ class LogEditorDialog(QtWidgets.QDialog):
             "start_time": start_dt.strftime("%H:%M"),
             "end_time": end_dt.strftime("%H:%M"),
             "content": content,
-            "timestamp": self.original_log.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            "modified": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": self.original_log.get("timestamp") or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "modified": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") if not self.is_new_log else "",
         }
 
         self.result_log = new_log
@@ -772,3 +793,4 @@ def show_work_log_window(parent_widget: Optional[Any] = None) -> WorkLogManager:
 if __name__ == "__main__":
     work_log_manager = WorkLogManager()
     work_log_manager.show_work_log()
+

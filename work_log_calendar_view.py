@@ -15,29 +15,37 @@ from PyQt5.QtCore import Qt
 WEEKDAY_NAMES: Tuple[str, ...] = ("월", "화", "수", "목", "금", "토", "일")
 
 
-def open_work_log_calendar(parent_widget: Optional[QtWidgets.QWidget], logs: List[Dict[str, Any]]) -> None:
+def open_work_log_calendar(
+    parent_widget: Optional[QtWidgets.QWidget],
+    logs: List[Dict[str, Any]],
+    manager: Optional[Any] = None,
+) -> None:
     """작업 로그 달력 창을 연다."""
-    if not logs:
-        target_parent = parent_widget if isinstance(parent_widget, QtWidgets.QWidget) else None
-        QtWidgets.QMessageBox.information(target_parent, "정보", "표시할 작업 로그가 없습니다.")
-        return
-
     target_parent = parent_widget if isinstance(parent_widget, QtWidgets.QWidget) else None
-    dialog = WorkLogCalendarDialog(logs=logs, parent=target_parent)
+    dialog = WorkLogCalendarDialog(logs=logs, manager=manager, parent=target_parent)
     dialog.exec_()
 
 
 class WorkLogCalendarDialog(QtWidgets.QDialog):
     """작업 로그를 달력 형식으로 보여주는 대화상자."""
 
-    def __init__(self, logs: List[Dict[str, Any]], parent: Optional[QtWidgets.QWidget] = None) -> None:
+    def __init__(
+        self,
+        logs: List[Dict[str, Any]],
+        manager: Optional[Any] = None,
+        parent: Optional[QtWidgets.QWidget] = None,
+    ) -> None:
         """대화상자를 초기화한다."""
         super().__init__(parent)
         self.logs = logs
+        self.manager = manager
         self.logs_by_date: Dict[datetime.date, List[Dict[str, Any]]] = {}
         self.month_counts: Dict[Tuple[int, int], int] = {}
+        self.liag_dates: set[datetime.date] = set()  # Li-Ag 충전이 있는 날짜들
+        self.overhaul_dates: set[datetime.date] = set()  # Overhaul이 있는 날짜들
         self._day_buttons: Dict[datetime.date, QtWidgets.QToolButton] = {}
         self._month_buttons: Dict[Tuple[int, int], QtWidgets.QToolButton] = {}
+        self._display_logs: List[Tuple[datetime.date, Dict[str, Any]]] = []  # 현재 표시 중인 로그들
 
         self._prepare_logs()
 
@@ -56,6 +64,36 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
     def _prepare_logs(self) -> None:
         """로그 데이터를 날짜별로 정리한다."""
         for log in self.logs:
+            # start_datetime과 end_datetime이 있으면 기간으로 처리
+            start_dt_str = log.get("start_datetime")
+            end_dt_str = log.get("end_datetime")
+            category = log.get("category", "")
+            is_liag = category == "Li-Ag 충전"
+            is_overhaul = category == "Overhaul"
+            
+            if start_dt_str and end_dt_str:
+                try:
+                    # datetime 문자열 파싱 (예: "2025-11-11 17:26")
+                    start_dt = datetime.datetime.strptime(start_dt_str, "%Y-%m-%d %H:%M").date()
+                    end_dt = datetime.datetime.strptime(end_dt_str, "%Y-%m-%d %H:%M").date()
+                    
+                    # 시작일부터 종료일까지의 모든 날짜에 로그 추가
+                    current_date = start_dt
+                    while current_date <= end_dt:
+                        self.logs_by_date.setdefault(current_date, []).append(log)
+                        self.month_counts[(current_date.year, current_date.month)] = (
+                            self.month_counts.get((current_date.year, current_date.month), 0) + 1
+                        )
+                        if is_overhaul:
+                            self.overhaul_dates.add(current_date)
+                        elif is_liag:
+                            self.liag_dates.add(current_date)
+                        current_date += datetime.timedelta(days=1)
+                    continue
+                except ValueError:
+                    pass
+            
+            # start_datetime/end_datetime이 없거나 파싱 실패 시 date 필드 사용
             date_str = log.get("date")
             if not date_str:
                 continue
@@ -68,6 +106,10 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
             self.month_counts[(date_obj.year, date_obj.month)] = (
                 self.month_counts.get((date_obj.year, date_obj.month), 0) + 1
             )
+            if is_overhaul:
+                self.overhaul_dates.add(date_obj)
+            elif is_liag:
+                self.liag_dates.add(date_obj)
 
     def _initial_date(self) -> datetime.date:
         """달력 표시를 시작할 기본 날짜를 반환한다."""
@@ -108,6 +150,8 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
         legend_layout.addWidget(QtWidgets.QLabel("표시 안내:", self))
         legend_layout.addLayout(self._create_legend_item("로그 없음", "#f0f0f0"))
         legend_layout.addLayout(self._create_legend_item("로그 있음", "#d8f0ff"))
+        legend_layout.addLayout(self._create_legend_item("Li-Ag 충전", "#e1bee7"))
+        legend_layout.addLayout(self._create_legend_item("Overhaul", "#ffcdd2"))
         legend_layout.addStretch()
 
         self.weekday_header_widget = QtWidgets.QWidget(self)
@@ -147,6 +191,25 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
 
         self.summary_label = QtWidgets.QLabel("선택한 기간에 등록된 로그가 없습니다.", detail_group)
         detail_layout.addWidget(self.summary_label)
+
+        # 로그 관리 버튼 추가
+        if self.manager is not None:
+            button_layout = QtWidgets.QHBoxLayout()
+            self.add_log_button = QtWidgets.QPushButton("로그 추가", detail_group)
+            self.edit_log_button = QtWidgets.QPushButton("로그 수정", detail_group)
+            self.delete_log_button = QtWidgets.QPushButton("로그 삭제", detail_group)
+            button_layout.addWidget(self.add_log_button)
+            button_layout.addWidget(self.edit_log_button)
+            button_layout.addWidget(self.delete_log_button)
+            button_layout.addStretch()
+            detail_layout.addLayout(button_layout)
+
+            self.add_log_button.clicked.connect(self._on_add_log_clicked)
+            self.edit_log_button.clicked.connect(self._on_edit_log_clicked)
+            self.delete_log_button.clicked.connect(self._on_delete_log_clicked)
+
+        # 테이블 더블클릭 이벤트 연결
+        self.log_table.doubleClicked.connect(self._on_log_double_clicked)
 
         self.main_layout.addLayout(header_layout)
         self.main_layout.addLayout(view_layout)
@@ -216,7 +279,13 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
 
                 if day.month == month:
                     button.setEnabled(True)
-                    bg_color = "#d8f0ff" if logs else "#f0f0f0"
+                    # 색상 우선순위: Overhaul > Li-Ag 충전 > 로그 있음 > 로그 없음
+                    if day in self.overhaul_dates:
+                        bg_color = "#ffcdd2"  # 빨간색
+                    elif day in self.liag_dates:
+                        bg_color = "#e1bee7"  # 연한 보라색
+                    else:
+                        bg_color = "#d8f0ff" if logs else "#f0f0f0"
                 else:
                     button.setEnabled(False)
                     bg_color = "#eeeeee"
@@ -257,7 +326,23 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
                 text += f"\n{count}건"
             button.setText(text)
 
-            bg_color = "#d8f0ff" if count else "#f0f0f0"
+            # 해당 월에 Overhaul 또는 Li-Ag 충전이 있는 날짜가 있는지 확인
+            has_overhaul = any(
+                date.year == year and date.month == month
+                for date in self.overhaul_dates
+            )
+            has_liag = any(
+                date.year == year and date.month == month
+                for date in self.liag_dates
+            )
+            
+            # 색상 우선순위: Overhaul > Li-Ag 충전 > 로그 있음 > 로그 없음
+            if has_overhaul:
+                bg_color = "#ffcdd2"  # 빨간색
+            elif has_liag:
+                bg_color = "#e1bee7"  # 연한 보라색
+            else:
+                bg_color = "#d8f0ff" if count else "#f0f0f0"
             button.setStyleSheet(
                 "QToolButton {"
                 f"background-color: {bg_color};"
@@ -347,6 +432,7 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
         self.selected_period_label.setText(label)
 
         self.log_table.setRowCount(0)
+        self._display_logs = entries  # 선택한 로그를 저장
         if not entries:
             self.summary_label.setText("선택한 기간에 등록된 로그가 없습니다.")
             return
@@ -424,6 +510,179 @@ class WorkLogCalendarDialog(QtWidgets.QDialog):
             return clean or "내용 없음"
         return f"{clean[:limit - 3]}..."
 
+    def _get_selected_log(self) -> Optional[Tuple[datetime.date, Dict[str, Any]]]:
+        """테이블에서 선택된 로그를 반환한다."""
+        selected_row = self.log_table.currentRow()
+        if selected_row < 0 or not hasattr(self, "_display_logs"):
+            return None
+        if selected_row >= len(self._display_logs):
+            return None
+        return self._display_logs[selected_row]
+
+    def _on_log_double_clicked(self, index: QtCore.QModelIndex) -> None:
+        """로그 더블클릭 시 상세 정보를 표시한다."""
+        selected = self._get_selected_log()
+        if selected is None:
+            return
+        _, log = selected
+        self._show_log_detail(log)
+
+    def _show_log_detail(self, log: Dict[str, Any]) -> None:
+        """로그 상세 정보를 팝업으로 표시한다."""
+        if self.manager is None:
+            # manager가 없으면 간단한 메시지 박스로 표시
+            content = log.get("content", "")
+            message = (
+                f"날짜: {log.get('date', '')}\n"
+                f"카테고리: {log.get('category', '')}\n"
+                f"상태: {log.get('status', '')}\n"
+                f"시간: {self._format_time_info(log)}\n\n"
+                f"내용:\n{content}"
+            )
+            QtWidgets.QMessageBox.information(self, "로그 상세", message)
+            return
+
+        # work_log_manager에서 LogDetailDialog import
+        try:
+            from work_log_manager import LogDetailDialog
+
+            dialog = LogDetailDialog(log, parent=self)
+            dialog.exec_()
+        except ImportError:
+            # import 실패 시 간단한 메시지 박스로 표시
+            content = log.get("content", "")
+            message = (
+                f"날짜: {log.get('date', '')}\n"
+                f"카테고리: {log.get('category', '')}\n"
+                f"상태: {log.get('status', '')}\n"
+                f"시간: {self._format_time_info(log)}\n\n"
+                f"내용:\n{content}"
+            )
+            QtWidgets.QMessageBox.information(self, "로그 상세", message)
+
+    def _on_add_log_clicked(self) -> None:
+        """새 로그 추가 버튼 클릭 시 처리한다."""
+        if self.manager is None:
+            QtWidgets.QMessageBox.warning(self, "오류", "로그 관리자가 설정되지 않았습니다.")
+            return
+
+        try:
+            from work_log_manager import LogEditorDialog, CATEGORY_OPTIONS, STATUS_OPTIONS
+
+            # 새 로그를 위한 빈 딕셔너리 생성
+            new_log: Dict[str, Any] = {
+                "date": self.selected_date.strftime("%Y-%m-%d"),
+                "category": CATEGORY_OPTIONS[0] if CATEGORY_OPTIONS else "",
+                "status": STATUS_OPTIONS[0] if STATUS_OPTIONS else "",
+                "start_datetime": "",
+                "end_datetime": "",
+                "start_time": "",
+                "end_time": "",
+                "content": "",
+                "timestamp": "",
+            }
+
+            # LogEditorDialog를 새 로그 모드로 사용
+            dialog = LogEditorDialog(new_log, parent=self)
+            if dialog.exec_() == QtWidgets.QDialog.Accepted:
+                if dialog.result_log is not None:
+                    logs = self.manager.load_work_logs()
+                    logs.append(dialog.result_log)
+                    logs = self.manager.sort_logs(logs)
+                    if self.manager.save_work_logs(logs):
+                        QtWidgets.QMessageBox.information(self, "완료", "로그가 추가되었습니다.")
+                        self._refresh_calendar()
+                    else:
+                        QtWidgets.QMessageBox.critical(self, "오류", "로그 저장에 실패했습니다.")
+        except ImportError as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"모듈을 불러올 수 없습니다: {e}")
+
+    def _on_edit_log_clicked(self) -> None:
+        """로그 수정 버튼 클릭 시 처리한다."""
+        if self.manager is None:
+            QtWidgets.QMessageBox.warning(self, "오류", "로그 관리자가 설정되지 않았습니다.")
+            return
+
+        selected = self._get_selected_log()
+        if selected is None:
+            QtWidgets.QMessageBox.warning(self, "선택 오류", "수정할 로그를 선택하세요.")
+            return
+
+        _, log = selected
+        try:
+            from work_log_manager import LogEditorDialog
+
+            dialog = LogEditorDialog(log, parent=self)
+            if dialog.exec_() == QtWidgets.QDialog.Accepted:
+                if dialog.result_log is not None:
+                    logs = self.manager.load_work_logs()
+                    # 기존 로그 찾아서 교체
+                    for i, existing_log in enumerate(logs):
+                        if existing_log.get("timestamp") == log.get("timestamp"):
+                            logs[i] = dialog.result_log
+                            break
+                    logs = self.manager.sort_logs(logs)
+                    if self.manager.save_work_logs(logs):
+                        QtWidgets.QMessageBox.information(self, "완료", "로그가 수정되었습니다.")
+                        self._refresh_calendar()
+                    else:
+                        QtWidgets.QMessageBox.critical(self, "오류", "로그 저장에 실패했습니다.")
+        except ImportError as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"모듈을 불러올 수 없습니다: {e}")
+
+    def _on_delete_log_clicked(self) -> None:
+        """로그 삭제 버튼 클릭 시 처리한다."""
+        if self.manager is None:
+            QtWidgets.QMessageBox.warning(self, "오류", "로그 관리자가 설정되지 않았습니다.")
+            return
+
+        selected = self._get_selected_log()
+        if selected is None:
+            QtWidgets.QMessageBox.warning(self, "선택 오류", "삭제할 로그를 선택하세요.")
+            return
+
+        _, log = selected
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "삭제 확인",
+            f"다음 로그를 삭제하시겠습니까?\n\n"
+            f"날짜: {log.get('date', '')}\n"
+            f"카테고리: {log.get('category', '')}\n"
+            f"내용: {self._content_summary(log.get('content', ''), 50)}",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+
+        if reply == QtWidgets.QMessageBox.Yes:
+            logs = self.manager.load_work_logs()
+            # timestamp로 로그 찾아서 삭제
+            timestamp = log.get("timestamp")
+            if timestamp:
+                logs = [l for l in logs if l.get("timestamp") != timestamp]
+                if self.manager.save_work_logs(logs):
+                    QtWidgets.QMessageBox.information(self, "완료", "로그가 삭제되었습니다.")
+                    self._refresh_calendar()
+                else:
+                    QtWidgets.QMessageBox.critical(self, "오류", "로그 저장에 실패했습니다.")
+            else:
+                QtWidgets.QMessageBox.warning(self, "오류", "로그를 식별할 수 없습니다.")
+
+    def _refresh_calendar(self) -> None:
+        """달력을 새로고침한다."""
+        if self.manager is None:
+            return
+        # 로그 다시 로드
+        self.logs = self.manager.load_work_logs()
+        # 데이터 재정리
+        self.logs_by_date.clear()
+        self.month_counts.clear()
+        self.liag_dates.clear()
+        self.overhaul_dates.clear()
+        self._prepare_logs()
+        # 달력 다시 그리기
+        self._draw_calendar()
+        self._update_detail_for_date(self.selected_date)
+
 
 if __name__ == "__main__":
     sample_logs = [
@@ -441,3 +700,5 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication([])
     dialog = WorkLogCalendarDialog(sample_logs)
     dialog.exec_()
+
+

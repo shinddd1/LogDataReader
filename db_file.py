@@ -457,7 +457,7 @@ def read_db_file(db_path, params_to_read, time_cols, convert_datetime_vectorized
         time_col = next((c for c in time_cols if c in available_cols), None)
     if time_col is None:
         return None
-    
+
     cols_in_db = [col for col in params_to_read if col in available_cols]
     if not cols_in_db:
         return None
@@ -692,7 +692,7 @@ def read_multiple_db_files_parallel(db_files, params_to_read, time_cols, convert
                 tprint(f"  [완료] [{completed}/{total}] {filename}: {len(df):,} 행 (대기: {remaining_tasks}개)")
             else:
                 tprint(f"  [오류] [{completed}/{total}] {filename}: {status} (대기: {remaining_tasks}개)")
-    
+        
     # 원본 파일 순서대로 결과 반환
     return [results.get(db_path, (None, "처리 안됨"))[0] for db_path in db_files]
 

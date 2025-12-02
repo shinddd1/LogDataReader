@@ -407,7 +407,7 @@ def add_plot_controls(fig, ax, all_axes, yvar, df_all, root, custom_params, onse
     
     # 드래그 선택 기능 - 항상 새로운 컨텍스트 포함 함수를 사용
     print(f"add_plot_controls 호출됨: onselect={onselect is not None}")
-    from db_file import create_onselect_function_with_context
+    from Onselect_integral import create_onselect_function_with_context
     onselect_with_context = create_onselect_function_with_context(root, custom_params, df_all, yvar, ax, fig)
     print("context 포함 onselect 함수를 생성했습니다")
     

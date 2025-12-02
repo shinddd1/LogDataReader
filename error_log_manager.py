@@ -415,7 +415,7 @@ class ErrorLogManager:
         message_scrollbar = ttk.Scrollbar(message_frame, orient="vertical", command=message_text.yview)
         message_text.configure(yscrollcommand=message_scrollbar.set)
         
-        message_text.insert(tk.End, selected_event.get('message', ''))
+        message_text.insert(tk.END, selected_event.get('message', ''))
         message_text.config(state=tk.DISABLED)
         
         message_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)

@@ -46,9 +46,11 @@ plot_artists = []
 artist_legend_map = {}
 artist_legend_text_map = {}
 plot_scale_mode = 'linear'
+plot_style_mode = 'line'  # 'line', 'marker', 'line+marker'
 artist_colors = {}
 artist_labels = {}
 color_popup = None
+current_fig = None  # 현재 figure 참조
 
 
 # 폴더/파일 선택 기능 추가
@@ -193,7 +195,6 @@ file_status_label.grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(2, 0))
 
 button_column = ttk.Frame(folder_frame)
 button_column.grid(row=0, column=1, rowspan=2, sticky=tk.E)
-
 
 def apply_new_data_source(new_folder: str, new_files: list[str], mode: str) -> bool:
     """선택된 폴더/파일 정보로 전역 상태와 UI를 갱신합니다."""
@@ -814,7 +815,7 @@ btn_add_param.pack(pady=10)
 
 # plot_selected 함수의 사용자 정의 파라미터 부분 수정
 def plot_selected(event=None):
-    global yvar, ax1, ax, df_all, ax2, all_axes, plot_artists, artist_legend_map, plot_scale_mode, artist_colors, artist_labels, color_popup
+    global yvar, ax1, ax, df_all, ax2, all_axes, plot_artists, artist_legend_map, plot_scale_mode, plot_style_mode, artist_colors, artist_labels, color_popup, current_fig
     
     all_dfs = []
     plot_artists.clear()
@@ -986,9 +987,37 @@ def plot_selected(event=None):
     x = df_all['datetime']
     print(f"X축 데이터 확인: {len(x)} 포인트, 범위: {x.min()} ~ {x.max()}")
 
+    # 모든 기존 figure를 닫고 새로 생성
+    global current_fig
+    try:
+        # 모든 열린 figure 닫기
+        plt.close('all')
+    except Exception:
+        pass
+    current_fig = None
+
     fig, ax = plt.subplots(figsize=(12, 6))
+    current_fig = fig
+    # figure 제목 설정 (manager가 있는 경우에만)
+    try:
+        if fig.canvas.manager is not None:
+            fig.canvas.manager.set_window_title(f"Plot: {yvar}")
+    except Exception:
+        pass
     ax2 = None
     all_axes = [ax]
+
+    # 플롯 스타일 설정 함수
+    def get_plot_style():
+        """현재 플롯 스타일 모드에 따라 linestyle과 marker 반환"""
+        if plot_style_mode == 'line':
+            return {'linestyle': '-', 'marker': ''}
+        elif plot_style_mode == 'marker':
+            return {'linestyle': '', 'marker': 'o', 'markersize': 3}
+        elif plot_style_mode == 'line+marker':
+            return {'linestyle': '-', 'marker': 'o', 'markersize': 3}
+        else:
+            return {'linestyle': '-', 'marker': ''}
 
     if yvar == "Laser & EUV Power":
         # "Laser & EUV Power" Scatter 플롯 처리 (수정됨)
@@ -1111,6 +1140,7 @@ def plot_selected(event=None):
             param = valid_params[0]
             
             print(f"첫 번째 파라미터 플롯: {param}, X축 길이: {len(x)}, Y축 길이: {len(df_all[param])}")
+            plot_style = get_plot_style()
             line1 = ax1.plot(
                 x,
                 df_all[param],
@@ -1118,6 +1148,7 @@ def plot_selected(event=None):
                 color=colors[0],
                 linewidth=1.5,
                 picker=5,
+                **plot_style,
             )
             ax1.set_ylabel(param, color=colors[0])
             ax1.tick_params(axis='y', labelcolor=colors[0])
@@ -1138,6 +1169,7 @@ def plot_selected(event=None):
                     new_ax.spines['right'].set_position(('outward', 60 * (i-1)))
                 
                 print(f"추가 파라미터 플롯: {param}, X축 길이: {len(x)}, Y축 길이: {len(df_all[param])}")
+                plot_style = get_plot_style()
                 line = new_ax.plot(
                     x,
                     df_all[param],
@@ -1145,6 +1177,7 @@ def plot_selected(event=None):
                     color=colors[i % len(colors)],
                     linewidth=1.5,
                     picker=5,
+                    **plot_style,
                 )
                 new_ax.set_ylabel(param, color=colors[i % len(colors)])
                 new_ax.tick_params(axis='y', labelcolor=colors[i % len(colors)])
@@ -1178,7 +1211,8 @@ def plot_selected(event=None):
         
     else:
         # 단일 파라미터는 기존 로직 유지
-        single_lines = ax.plot(x, df_all[yvar], picker=5)
+        plot_style = get_plot_style()
+        single_lines = ax.plot(x, df_all[yvar], picker=5, **plot_style)
         for created_line in single_lines:
             color_hex = mcolors.to_hex(created_line.get_color())
             artist_colors[created_line] = color_hex
@@ -1237,7 +1271,8 @@ def plot_selected(event=None):
     from matplotlib.widgets import Button
 
     scale_var = tk.StringVar(master=root, value=plot_scale_mode)
-    scale_popup = None
+    style_var = tk.StringVar(master=root, value=plot_style_mode)
+    settings_popup = None  # 통합 설정 창
 
     def _double_size(value: float | int | str | None) -> float:
         if value is None:
@@ -1279,43 +1314,153 @@ def plot_selected(event=None):
         plot_scale_mode = mode
         fig.canvas.draw_idle()
 
-    def show_scale_popup():
-        nonlocal scale_popup
+    def show_unified_settings_popup():
+        """통합 설정 팝업을 표시한다 (스케일, 스타일, 색상)."""
+        nonlocal settings_popup
+        global color_popup
 
-        if scale_popup is not None and scale_popup.winfo_exists():
-            scale_popup.focus_set()
+        if settings_popup is not None and settings_popup.winfo_exists():
+            settings_popup.focus_set()
             return
 
-        scale_popup = tk.Toplevel(root)
-        scale_popup.title("Y축 스케일 설정")
-        scale_popup.geometry("260x140")
-        scale_popup.resizable(False, False)
+        # 기존 색상 팝업이 있으면 닫기
+        if color_popup is not None and color_popup.winfo_exists():
+            color_popup.destroy()
+            color_popup = None
 
-        ttk.Label(scale_popup, text="Y축 스케일을 선택하세요:", font=('Arial', 11)).pack(pady=(10, 5))
+        settings_popup = tk.Toplevel(root)
+        settings_popup.title("플롯 설정")
+        height_estimate = max(400, 200 + 40 * max(1, len(plot_artists)))
+        settings_popup.geometry(f"380x{height_estimate}")
+        settings_popup.resizable(False, True)
+
+        # 메인 프레임
+        main_frame = ttk.Frame(settings_popup, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Y축 스케일 설정 섹션
+        scale_frame = ttk.LabelFrame(main_frame, text="Y축 스케일", padding=10)
+        scale_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Radiobutton(
-            scale_popup,
+            scale_frame,
             text="선형 (Linear)",
             variable=scale_var,
             value='linear',
             command=apply_scale,
-        ).pack(anchor=tk.W, padx=15, pady=3)
+        ).pack(anchor=tk.W, padx=5, pady=3)
 
         ttk.Radiobutton(
-            scale_popup,
+            scale_frame,
             text="로그 (Log)",
             variable=scale_var,
             value='log',
             command=apply_scale,
-        ).pack(anchor=tk.W, padx=15, pady=3)
+        ).pack(anchor=tk.W, padx=5, pady=3)
+
+        # 2. 플롯 스타일 설정 섹션
+        style_frame = ttk.LabelFrame(main_frame, text="플롯 스타일", padding=10)
+        style_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Radiobutton(
+            style_frame,
+            text="실선 (Line)",
+            variable=style_var,
+            value='line',
+            command=apply_style,
+        ).pack(anchor=tk.W, padx=5, pady=3)
+
+        ttk.Radiobutton(
+            style_frame,
+            text="점 (Marker)",
+            variable=style_var,
+            value='marker',
+            command=apply_style,
+        ).pack(anchor=tk.W, padx=5, pady=3)
+
+        ttk.Radiobutton(
+            style_frame,
+            text="점+실선 (Line+Marker)",
+            variable=style_var,
+            value='line+marker',
+            command=apply_style,
+        ).pack(anchor=tk.W, padx=5, pady=3)
+
+        # 3. 색상 설정 섹션
+        color_frame = ttk.LabelFrame(main_frame, text="플롯 색상", padding=10)
+        color_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # 스크롤 가능한 색상 목록
+        color_canvas = tk.Canvas(color_frame, height=min(300, 40 * max(1, len(plot_artists))))
+        color_scrollbar = ttk.Scrollbar(color_frame, orient="vertical", command=color_canvas.yview)
+        color_scrollable_frame = ttk.Frame(color_canvas)
+
+        color_scrollable_frame.bind(
+            "<Configure>",
+            lambda e: color_canvas.configure(scrollregion=color_canvas.bbox("all"))
+        )
+
+        color_canvas.create_window((0, 0), window=color_scrollable_frame, anchor="nw")
+        color_canvas.configure(yscrollcommand=color_scrollbar.set)
+
+        if not plot_artists:
+            ttk.Label(color_scrollable_frame, text="변경 가능한 플롯이 없습니다.").pack(pady=10)
+        else:
+            for artist in plot_artists:
+                label_text = artist_labels.get(artist, artist.get_label())
+                row = ttk.Frame(color_scrollable_frame)
+                row.pack(fill=tk.X, pady=4)
+
+                ttk.Label(row, text=label_text).pack(side=tk.LEFT, padx=(0, 6))
+                swatch = tk.Label(row, width=6, relief="groove", background=_extract_artist_color(artist))
+                swatch.pack(side=tk.LEFT, padx=(0, 10))
+
+                def choose_color(a=artist, swatch_label=swatch):
+                    initial = _extract_artist_color(a)
+                    color_selection = colorchooser.askcolor(color=initial, title="색상 선택")
+                    if not color_selection or color_selection[1] is None:
+                        return
+                    new_color = color_selection[1]
+                    _update_artist_color(a, new_color)
+                    swatch_label.configure(background=new_color)
+
+                ttk.Button(row, text="색상 변경", command=choose_color).pack(side=tk.RIGHT)
+
+        color_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        color_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         def close_popup():
-            nonlocal scale_popup
-            if scale_popup is not None:
-                scale_popup.destroy()
-                scale_popup = None
+            nonlocal settings_popup
+            global color_popup
+            if settings_popup is not None:
+                settings_popup.destroy()
+                settings_popup = None
+            color_popup = None
 
-        scale_popup.protocol("WM_DELETE_WINDOW", close_popup)
+        settings_popup.protocol("WM_DELETE_WINDOW", close_popup)
+
+    def apply_style():
+        """플롯 스타일을 적용하고 플롯을 다시 그린다."""
+        global plot_style_mode
+        mode = style_var.get()
+        plot_style_mode = mode
+        
+        # 모든 플롯 아티스트의 스타일 업데이트
+        plot_style = get_plot_style()
+        for artist in plot_artists:
+            if hasattr(artist, 'set_linestyle'):
+                artist.set_linestyle(plot_style.get('linestyle', '-'))
+            if hasattr(artist, 'set_marker'):
+                marker = plot_style.get('marker', '')
+                if marker:
+                    artist.set_marker(marker)
+                    if 'markersize' in plot_style:
+                        artist.set_markersize(plot_style['markersize'])
+                else:
+                    artist.set_marker('')
+        
+        fig.canvas.draw_idle()
+
 
     def _extract_artist_color(artist) -> str:
         stored = artist_colors.get(artist)
@@ -1369,7 +1514,7 @@ def plot_selected(event=None):
         axis = getattr(artist, 'axes', None)
         if axis is not None:
             try:
-                axis.yaxis.label.set색(new_color)
+                axis.yaxis.label.set_color(new_color)
             except Exception:
                 pass
             try:
@@ -1380,95 +1525,29 @@ def plot_selected(event=None):
         artist_colors[artist] = new_color
         fig.canvas.draw_idle()
 
-    color_popup_content: ttk.Frame | None = None
 
-    def rebuild_color_popup():
-        nonlocal color_popup_content
-        global color_popup
-
-        if color_popup is None or not color_popup.winfo_exists():
-            return
-
-        if color_popup_content is None or not color_popup_content.winfo_exists():
-            color_popup_content = ttk.Frame(color_popup, padding=12)
-            color_popup_content.pack(fill=tk.BOTH, expand=True)
-        else:
-            for child in color_popup_content.winfo_children():
-                child.destroy()
-
-        if not plot_artists:
-            ttk.Label(color_popup_content, text="변경 가능한 플롯이 없습니다.").pack(pady=10)
-            return
-
-        for artist in plot_artists:
-            label_text = artist_labels.get(artist, artist.get_label())
-            row = ttk.Frame(color_popup_content)
-            row.pack(fill=tk.X, pady=4)
-
-            ttk.Label(row, text=label_text).pack(side=tk.LEFT, padx=(0, 6))
-            swatch = tk.Label(row, width=6, relief="groove", background=_extract_artist_color(artist))
-            swatch.pack(side=tk.LEFT, padx=(0, 10))
-
-            def choose_color(a=artist, swatch_label=swatch):
-                initial = _extract_artist_color(a)
-                color_selection = colorchooser.askcolor(color=initial, title="색상 선택")
-                if not color_selection or color_selection[1] is None:
-                    return
-                new_color = color_selection[1]
-                _update_artist_color(a, new_color)
-                swatch_label.configure(background=new_color)
-
-            ttk.Button(row, text="색상 변경", command=choose_color).pack(side=tk.RIGHT)
-
-    def open_color_popup():
-        nonlocal color_popup_content
-        global color_popup
-
-        if color_popup is None or not color_popup.winfo_exists():
-            color_popup = tk.Toplevel(root)
-            color_popup.title("플롯 색상 설정")
-            height_estimate = max(200, 90 + 40 * max(1, len(plot_artists)))
-            color_popup.geometry(f"340x{height_estimate}")
-            color_popup.resizable(False, True)
-
-            def handle_close():
-                nonlocal color_popup_content
-                global color_popup
-                if color_popup is not None:
-                    color_popup.destroy()
-                color_popup = None
-                color_popup_content = None
-
-            color_popup.protocol("WM_DELETE_WINDOW", handle_close)
-            color_popup_content = None
-        else:
-            color_popup.deiconify()
-            color_popup.focus_set()
-
-        rebuild_color_popup()
 
     def on_key_press(event):
         if getattr(event, 'key', '') == 's':
-            show_scale_popup()
+            show_unified_settings_popup()
 
     def on_figure_close(_):
-        nonlocal scale_popup, color_popup_content
-        global color_popup
-        if scale_popup is not None and scale_popup.winfo_exists():
-            scale_popup.destroy()
-        scale_popup = None
+        nonlocal settings_popup
+        global color_popup, current_fig
+        if settings_popup is not None and settings_popup.winfo_exists():
+            settings_popup.destroy()
+        settings_popup = None
         if color_popup is not None and color_popup.winfo_exists():
             color_popup.destroy()
         color_popup = None
-        color_popup_content = None
+        current_fig = None
 
     fig.canvas.mpl_connect('close_event', on_figure_close)
     fig.canvas.mpl_connect('key_press_event', on_key_press)
 
     _double_axis_fonts()
     apply_scale()
-    open_color_popup()
-    show_scale_popup()
+    show_unified_settings_popup()
 
     # 저장 기능 수정
     def save_current_data():
@@ -1493,7 +1572,7 @@ def plot_selected(event=None):
             dt_min = mdates.num2date(xlim[0]).replace(tzinfo=None)
             dt_max = mdates.num2date(xlim[1]).replace(tzinfo=None)
             
-            print(f"현재 화면 সময় 범위: {dt_min} ~ {dt_max}")
+            print(f"현재 화면 시간 범위: {dt_min} ~ {dt_max}")
             
             # 현재 화면에 표시된 시간 범위의 데이터만 필터링
             # matplotlib 한계로 인해 경계 값이 살짝 잘리는 경우가 있어 여유 구간을 둔다.
@@ -1516,8 +1595,26 @@ def plot_selected(event=None):
                 messagebox.showwarning("경고", "현재 화면에 표시된 데이터가 없습니다.")
                 return
             
-            # datetime을 문자열로 변환 (Excel/CSV 저장용)
-            df_visible['datetime'] = df_visible['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            # 현재 플롯된 파라미터 목록 추출
+            if yvar in custom_params:
+                # 사용자 정의 파라미터인 경우
+                param_info = custom_params[yvar]
+                plotted_params = param_info['params']
+            elif yvar == "Laser & EUV Power":
+                # Laser & EUV Power 특수 케이스
+                plotted_params = ["laser_power_value", "euvChamber_euvPower_value"]
+            else:
+                # 단일 파라미터
+                plotted_params = [yvar]
+            
+            # datetime과 플롯된 파라미터만 선택
+            columns_to_save = ['datetime'] + [p for p in plotted_params if p in df_visible.columns]
+            df_to_save = df_visible[columns_to_save].copy()
+            
+            print(f"저장할 컬럼: {columns_to_save}")
+            
+            # datetime을 문자열로 변환 (Excel 저장용)
+            df_to_save['datetime'] = df_to_save['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
             
             # 파일명 생성 (안전한 문자로 변환)
             safe_filename = str(yvar).replace(' ', '_').replace('&', 'and').replace('/', '_')
@@ -1526,8 +1623,8 @@ def plot_selected(event=None):
             time_range_str = f"{dt_min.strftime('%Y%m%d_%H%M')}-{dt_max.strftime('%Y%m%d_%H%M')}"
             
             file_path = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx")],
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv")],
                 title="현재 화면 데이터 저장",
                 initialfile=f"{safe_filename}_{time_range_str}"
             )
@@ -1535,16 +1632,17 @@ def plot_selected(event=None):
             if not file_path:
                 return
             
-            # 파일 저장
-            if file_path.lower().endswith('.xlsx'):
-                df_visible.to_excel(file_path, index=False)
+            # 파일 저장 (기본은 Excel)
+            if file_path.lower().endswith('.csv'):
+                df_to_save.to_csv(file_path, index=False, encoding='utf-8-sig')
             else:
-                df_visible.to_csv(file_path, index=False, encoding='utf-8-sig')
+                df_to_save.to_excel(file_path, index=False)
             
             # 저장 완료 메시지 (상세 정보 포함)
             messagebox.showinfo("저장 완료", 
                 f"파일이 저장되었습니다:\n{file_path}\n\n"
-                f"저장된 데이터: {len(df_visible)}개 포인트 (전체 {len(df_all)}개 중)\n"
+                f"저장된 데이터: {len(df_to_save)}개 포인트 (전체 {len(df_all)}개 중)\n"
+                f"저장된 컬럼: {', '.join(columns_to_save)}\n"
                 f"화면 시간 범위: {dt_min.strftime('%Y-%m-%d %H:%M:%S')} ~ {dt_max.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 f"파라미터: {yvar}")
                 
@@ -1560,8 +1658,17 @@ def plot_selected(event=None):
     save_btn.label.set_fontsize(9)
     save_btn.on_clicked(lambda x: save_current_data())
     
+    # 모든 열린 figure를 닫고 현재 figure만 표시
+    try:
+        # 현재 figure를 제외한 모든 figure 닫기
+        for fig_num in plt.get_fignums():
+            if fig_num != fig.number:
+                plt.close(fig_num)
+    except Exception:
+        pass
+    
+    # figure를 표시 (한 번만)
     plt.show()
-
 
 def show_work_log_messages_for_date(date, logs_for_date):
     """특정 날짜의 작업 로그 메시지를 보여주는 함수"""
@@ -1607,7 +1714,7 @@ def show_work_log_messages_for_date(date, logs_for_date):
         scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=scrollbar.set)
         
-        # 트리뷰와 스크्रोल바 배치
+        # 트리뷰와 스크롤바 배치
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -1674,7 +1781,6 @@ def show_work_log_messages_for_date(date, logs_for_date):
     except Exception as e:
         messagebox.showerror("오류", f"로그 표시 중 오류가 발생했습니다:\n{e}")
         print(f"로그 표시 오류: {e}")
-
 
 def show_work_log_messages():
     """작업 로그 메시지를 보여주는 함수"""
